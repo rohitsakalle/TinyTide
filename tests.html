@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width"><title>Tiny Tide engine checks</title></head>
+<body>
+  <h1>Tiny Tide engine checks</h1>
+  <pre id="results">Running…</pre>
+  <p><a href="./">Back to the canal</a></p>
+  <script type="module">
+    import { runTests, runBrowserTests } from "./tests.js";
+    const result = runTests();
+    document.getElementById("results").textContent = result.results.join("\n") + "\n\nChecking browser integration…";
+    const browser = await runBrowserTests();
+    const passed = result.passed + browser.passed;
+    const total = result.total + browser.total;
+    document.getElementById("results").textContent = [...result.results, ...browser.results].join("\n") + `\n\n${passed}/${total} passed`;
+    document.documentElement.dataset.result = passed === total ? "passed" : "failed";
+  </script>
+</body>
+</html>
