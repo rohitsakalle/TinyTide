@@ -8,16 +8,76 @@ immediate retry and a local personal best.
 Choose **Easy**, **Medium**, or **Fast** with the Pace selector before starting.
 Medium keeps the original pace. Each mode has a separate distance record; old
 records are retained as Medium records. Pace is locked while running or paused,
-and can be changed after a collision. Faster modes keep adequate warning and
-transition space rather than creating impossible obstacle combinations.
+and can be changed after a collision. Speed ramps smoothly over **90 active
+seconds** from 105 to 165 world-pixels/s on Easy, 145 to 220 on Medium, and 190
+to 275 on Fast. Flow displays ramp progress and the current speed multiplier.
+Pause/background time does not advance it; retry resets it.
+
+Newly generated hazards gradually get wider and demand higher water over rocks
+and lower water under bridges. Alternation becomes more frequent and the gaps
+shrink, but retain a full-height transition, 0.25s reaction allowance, boat
+overlap and the first coin's approach distance at the mode's maximum future
+speed. The visible world gives at least a full transition plus 0.5s warning at
+that speed. Existing obstacles never change shape as they approach.
 
 Gold coin trails follow safe routes over rocks and under bridges. Collect them
 with the boat for a floating `+1`, a pickup chime and a run count. The **Coin
 bank** saves every pickup immediately, survives retries and is shared across
-paces. Coins are only a collection score for now: no shop, spending, cash value,
-purchases or account sync. Records, coins and sound preference are local to
-this browser. If storage is blocked, an explicit notice explains that progress
-lasts only for the current visit.
+paces and courses. Spend them only on cosmetic boats in **Boat studio & missions**:
+Sunrise paper is free, Mint explorer costs 25 coins, and Berry voyager costs
+50. Each has a preview; owned boats can be reselected for free. Selection is
+locked during runs and pauses. Hull/sail colors change, not physics, collision
+size, coin collection or scoring. There is no cash value, real-money payment or
+account sync. Records, coins and sound preference are local to this browser.
+
+Existing coin balances migrate into one versioned progress record containing
+bank, owned/selected boats, completed missions and recent daily records. Spending
+and ownership are saved together, as are mission rewards and completion flags.
+A failed purchase save does not spend coins or grant ownership. Storage failures
+show an explicit notice: new rewards last only for that visit and purchases are
+disabled. Invalid saved progress is preserved, not silently overwritten. Earlier
+coin keys are left intact as migration sources, not continuously mirrored.
+
+## Perfect passes, missions and scenery
+
+The score is **one point per metre plus perfect-pass bonuses**. Finish an obstacle
+with 12–38 world-pixels of safe clearance between hull and rock, or sail and
+bridge, on the last overlapping physics tick to earn a perfect pass. A dashed
+gold bracket beside the next obstacle shows the waterline target band; this is
+optional skill play, not a required route. Consecutive perfect passes award
+5, 10, 15, 20, then 25 bonus points each (the bonus caps at 25). A safe but
+non-perfect pass breaks the combo; every perfect pass has visible feedback and
+a chime. Retries reset combos and bonuses. Existing best-distance numbers remain
+the initial best-score values for their pace; no previous record is erased.
+
+Three one-time missions track **a single run**, on either course: collect 10
+coins (+15), clear 5 obstacles (+10), and make 3 perfect passes (+20). Progress
+and completion are shown in the studio, with completion announcements. Rewards
+are credited immediately and each goal pays once per browser profile, not once
+per retry or day. Unfinished progress resets on retry; completed goals persist.
+The coin count for a mission counts actual pickups, not reward coins.
+
+Scenery blends from garden canal to rainy streets, then moonlit water as active
+run time advances. Transitions begin at 25 seconds, reach rainy streets at 60,
+and moonlit water at 95. Weather stays behind obstacles, hazard/coin/boat shapes
+remain consistent, and scenery never changes collision rules. Reduced-motion
+preferences remove moving rain and water ripples.
+
+## Daily course
+
+Choose **Daily** before starting for a date-labeled, UTC-seeded endless course.
+It always uses the same Medium starting profile and progression; pace selection
+is disabled. Everyone on the same game version and UTC date gets the same
+obstacle/coin course. Fixed 120Hz physics ticks keep generation independent of
+display frame timing. Retry restarts that day's seed, not a fresh random route.
+
+Daily bests are separate from all Endless records, with the most recent 14 dates
+retained locally. A run crossing UTC midnight keeps its original date and record
+until it ends; the next start uses the new date. Date selection uses the device
+clock and works offline, not an online time service. This is a local challenge,
+not a verified leaderboard or anti-cheat system. Skins and missions work on both
+courses without modifying the course. Course and pace stay locked during play
+and pause.
 
 Gentle synthesized notes accompany launch, tide changes, coin pickups and the
 end of a run. **Sound on / Sound off** mutes all effects and saves your choice.
@@ -56,7 +116,7 @@ running the server. The bundled server is for local development, not public host
 
 ## Offline / hosting
 
-Publish `index.html`, `style.css`, `app.js`, `engine.js`, `sound.js`, `sw.js`,
+Publish `index.html`, `style.css`, `app.js`, `engine.js`, `sound.js`, `progress.js`, `sw.js`,
 `manifest.webmanifest`, and `icon.svg` to any HTTPS static host (including GitHub
 Pages). No backend or external assets are needed. Relative URLs work under a
 repository subpath.
@@ -81,8 +141,12 @@ runner covers bounded water motion, both collision types, scoring/reset,
 frame-rate independence, warning distance, and seeded procedural reachability
 at maximum speed, plus responsive layout, keyboard/pointer input state,
 pause/resume, failure, retry, coin pickups and persistence, best-score migration,
-all three paces and their coin-trail reachability, and sound unlock/mute/error
-flows in an isolated game frame. Sound lifecycle tests use a deterministic Web
+all three paces and late-run coin-trail reachability, measurable speed/geometry
+ramps, perfect combos, cosmetic spending and failed-save safety, one-time mission
+rewards, daily reproducibility at multiple frame rates, UTC dates and separate
+daily records, scenery, and sound unlock/mute/error flows in an isolated game
+frame. The UI tests restore the prior local data afterward; don't play in another
+tab while the isolated tests run. Sound lifecycle tests use a deterministic Web
 Audio double, plus real Web Audio offline rendering to check non-silent output
 and cancellation. Real-device speaker quality and browser gesture policy still
 need device testing.
@@ -96,9 +160,11 @@ afterward. The test-runner page itself is intentionally not cached.
 
 ## Prototype scope
 
-One endless game with three paces, responsive canvas, procedural obstacles,
-collectible coins, synthesized sound, quick restart, per-pace local bests,
-pause, and offline core play. No ads, purchases, accounts, analytics,
+Endless play with three paces, one fixed-profile daily course, responsive canvas,
+progressive procedural obstacles, collectible coins, cosmetic boat spending,
+perfect combos, three missions, changing scenery, synthesized sound, quick
+restart, per-pace/daily local bests, pause, and offline core play.
+No ads, real-money purchases, accounts, analytics,
 external fonts, or third-party assets. Best scores belong to this browser, not
 an account. Clearing site data removes records, coins and sound preference.
 
@@ -142,7 +208,7 @@ the next change; do not treat any results as collected until real sessions occur
 
 ### Sharing the prototype
 
-The static release consists only of the eight files listed in Offline / hosting.
+The static release consists only of the nine files listed in Offline / hosting.
 Serve them from a single HTTPS directory; no build, dependencies or credentials.
 Do not send `file:` URLs or the local development server as a public service.
 The approved GitHub Pages preview uses the repository root of

@@ -24,8 +24,22 @@ small { font-size: 14px; margin-left: 4px; color: #789087; }
 .sound-button { min-height: 44px; border: 1px solid #d9e1d5; border-radius: 22px; padding: 8px 12px; background: transparent; color: #315a52; font-size: 11px; white-space: nowrap; }
 .sound-button[aria-pressed="true"] { background: #e8eee1; }
 .coin-bar { min-height: 34px; display: flex; align-items: center; gap: 18px; padding: 0 30px 10px; font-size: 11px; color: #6b7154; }
+.coin-bar { flex-wrap: wrap; }
+.run-status { display: flex; justify-content: space-between; gap: 12px; padding: 0 30px 10px; font-size: 10px; color: #50766b; }
+.run-status #combo { text-align: right; }
+.studio { margin-top: 12px; padding: 12px 18px; background: #faf9f1; border: 1px solid #d7dfd1; border-radius: 16px; font-size: 12px; }
+.studio summary { cursor: pointer; min-height: 28px; line-height: 28px; font-weight: bold; }
+#mission-summary { font-weight: normal; color: #68817a; margin-left: 10px; font-size: 10px; }
+.studio p { line-height: 1.6; color: #50766b; }
+.studio h2 { font-size: 16px; }
+.skins { display: flex; flex-wrap: wrap; gap: 12px; }
+.skin-card { flex: 1 1 150px; border: 1px solid #d7dfd1; border-radius: 14px; padding: 14px; text-align: center; }
+.skin-preview { display: block; width: 65px; height: 45px; margin: 0 auto 8px; }
+.skin-card button { min-height: 44px; margin-top: 8px; border: 1px solid #b8cdb9; border-radius: 20px; padding: 8px 14px; background: #e8eee1; color: #235a50; }
+#missions { padding-left: 20px; line-height: 2; }
 .coin-bar b { color: #795722; font-variant-numeric: tabular-nums; }
-.coin-symbol { color: #c89430; margin-right: -10px; }
+.coin-totals { display: inline-flex; gap: 10px; align-items: center; white-space: nowrap; }
+.coin-symbol { color: #c89430; }
 #coin-feedback { margin-left: auto; font-size: 10px; }
 .mode-label { display: flex; align-items: center; gap: 7px; }
 select { font: inherit; color: #315a52; background: #edf0e3; border: 1px solid #d9e1d5; border-radius: 12px; min-height: 44px; padding: 8px; }
@@ -71,7 +85,9 @@ footer { display: flex; justify-content: space-between; gap: 12px; margin: 19px 
   .sound-button { font-size: 10px; padding: 7px 9px; }
   .coin-bar { padding: 0 12px 10px; gap: 12px; flex-wrap: wrap; font-size: 10px; }
   #coin-feedback { width: 100%; margin-left: 0; min-height: 13px; }
-  .coin-symbol { margin-right: -6px; }
+  .run-status { padding: 0 12px 10px; font-size: 9px; }
+  .studio { padding: 10px 12px; }
+  #mission-summary { display: block; margin-left: 0; }
   .playfield { height: clamp(330px, 48svh, 520px); }
   .control-bar { flex-wrap: wrap; gap: 10px; padding: 13px 8px; }
   .tide-button { order: -1; width: 88%; padding: 15px; }

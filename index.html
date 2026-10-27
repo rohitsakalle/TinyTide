@@ -18,11 +18,18 @@
     </header>
     <section class="game-shell" aria-label="Tiny Tide game">
       <div class="game-top">
-        <div class="score-group"><span class="eyebrow">DISTANCE</span><strong><span id="score">0</span><small>m</small></strong></div>
+        <div class="score-group"><span class="eyebrow">SCORE</span><strong><span id="score">0</span><small>pts</small></strong></div>
         <div id="next" class="next">Find your flow</div>
         <div class="game-actions"><div class="best"><span class="eyebrow">PERSONAL BEST</span><strong id="best">0 m</strong></div><button id="sound" class="sound-button" aria-label="Mute sound" aria-pressed="false">Sound on</button><button id="pause" class="icon-button" aria-label="Pause game" disabled>Ⅱ</button></div>
       </div>
-      <div class="coin-bar"><label class="mode-label" for="mode">Pace <select id="mode"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="fast">Fast</option></select></label><span class="coin-symbol" aria-hidden="true">●</span><span>This run <b id="run-coins">0</b></span><span>Coin bank <b id="coin-bank">0</b></span><span id="coin-feedback" role="status" aria-live="polite">Follow the gold. Find your flow.</span></div>
+      <div class="coin-bar">
+        <label class="mode-label" for="course">Course <select id="course"><option value="endless">Endless</option><option value="daily">Daily</option></select></label>
+        <label class="mode-label" for="mode">Pace <select id="mode"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="fast">Fast</option></select></label>
+        <span id="daily-date" hidden></span><span id="flow" aria-label="Run progression">Flow 0% · 1.00×</span>
+        <span class="coin-totals"><span class="coin-symbol" aria-hidden="true">●</span><span>This run <b id="run-coins">0</b></span><span>Coin bank <b id="coin-bank">0</b></span></span>
+        <span id="coin-feedback" role="status" aria-live="polite">Follow the gold. Find your flow.</span>
+      </div>
+      <div class="run-status"><span id="scenery">Garden canal</span><span id="combo" role="status">Perfect pass: exit in the gold band.</span></div>
       <div class="playfield">
         <canvas id="game" tabindex="0" aria-label="Hold Space, Up arrow, or the screen to raise the water. Release to lower it. Avoid rocks and bridges."></canvas>
         <div class="overlay" id="overlay">
@@ -41,6 +48,17 @@
         <div class="control-tip"><span class="key">↓</span><span><b>Release</b> for low bridges</span></div>
       </div>
     </section>
+    <details class="studio" id="studio">
+      <summary>Boat studio &amp; missions <span id="mission-summary">Three little goals</span></summary>
+      <p>Cosmetics only. Spend collected coins, never real money. Choose a boat between runs.</p>
+      <p>Perfect passes: the gold bracket marks your target waterline as you exit a rock or bridge. Close, safe exits build a combo for 5–25 bonus points per pass. Missing the band is safe, but resets the combo.</p>
+      <div id="skins" class="skins"></div>
+      <p id="shop-feedback" role="status"></p>
+      <h2>One-time missions</h2>
+      <p>Complete each goal in a single run, on either course. Each reward is paid only once.</p>
+      <ul id="missions"></ul>
+      <p id="mission-feedback" role="status" aria-live="polite"></p>
+    </details>
     <footer><span>A little anticipation goes a long way.</span><span id="connection" role="status">Preparing offline play…</span><span class="desktop-hint">SPACE / ↑ to rise · P to pause</span></footer>
     <p class="notice" id="notice" role="status"></p>
     <p class="sr-only" id="announcement" role="status" aria-live="polite"></p>

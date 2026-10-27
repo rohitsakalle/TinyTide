@@ -47,6 +47,7 @@ export class TideSound {
       rise: [[392, 0, .12], [523, .06, .16]],
       fall: [[523, 0, .1], [392, .06, .16]],
       finish: [[392, 0, .17], [330, .13, .17], [262, .26, .28]],
+      perfect: [[659, 0, .12], [880, .07, .14], [1319, .14, .2]],
     }[name];
     if (!notes) throw new RangeError(`Unknown sound: ${name}`);
     for (const [frequency, delay, duration] of notes) {

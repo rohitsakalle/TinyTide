@@ -1,5 +1,6 @@
-import { TideGame, RULES, MODES, minimumViewWidth, waterY } from "./engine.js";
+import { TideGame, RULES, MODES, minimumViewWidth, waterY, sceneryState } from "./engine.js";
 import { TideSound } from "./sound.js";
+import { ProgressStore, SKINS, MISSIONS, utcDate, dailyRandom } from "./progress.js";
 
 const $ = id => document.getElementById(id);
 const canvas = $("game");
@@ -11,8 +12,9 @@ let width = 900;
 let lastTime = 0;
 let visualTime = 0;
 let best = 0;
+let runDate = null;
+let runCourse = "endless";
 const bests = { easy: 0, medium: 0, fast: 0 };
-let coinBank = 0;
 let muted = false;
 let sparkles = [];
 let feedbackTime = 0;
@@ -32,16 +34,21 @@ try {
     bests[mode] = stored !== null && Number.isSafeInteger(value) && value >= 0 ? value : mode === "medium" ? best : 0;
   }
   best = bests.medium;
-  const savedCoins = Number(localStorage.getItem("tiny-tide-coins") || 0);
-  coinBank = Number.isSafeInteger(savedCoins) && savedCoins >= 0 ? savedCoins : 0;
   muted = localStorage.getItem("tiny-tide-muted") === "true";
 } catch (error) {
   storageAvailable = false;
   $("notice").textContent = "Private storage is unavailable. Scores, coins and settings last for this visit.";
   console.warn("Tiny Tide could not read local storage:", error);
 }
-$("best").textContent = `${best} m`;
-$("coin-bank").textContent = String(coinBank);
+$("best").textContent = `${best} pts`;
+const progress = new ProgressStore({
+  getItem: key => localStorage.getItem(key),
+  setItem: (key, value) => localStorage.setItem(key, value),
+}, error => {
+  $("notice").textContent = "Progress storage unavailable. New rewards last this visit; boat purchases are disabled.";
+  console.warn("Tiny Tide progress storage failed:", error);
+});
+const coinBank = () => progress.data.coins;
 const sound = new TideSound({ muted, onError: error => {
   $("sound").disabled = true;
   $("sound").textContent = "No audio";
@@ -66,14 +73,81 @@ function updateSoundButton() {
   $("sound").setAttribute("aria-label", muted ? "Enable sound" : "Mute sound");
 }
 updateSoundButton();
+function updateBestPreview() {
+  const daily = $("course").value === "daily";
+  best = daily ? progress.data.dailyBests[utcDate()] || 0 : bests[$("mode").value];
+  $("best").textContent = `${best} pts`;
+  $("daily-date").hidden = !daily;
+  $("daily-date").textContent = `${utcDate()} UTC · fixed Medium`;
+  $("mode").disabled = daily;
+}
+$("course").addEventListener("change", () => {
+  if (state !== "ready" && state !== "over") { $("course").value = runCourse; return; }
+  updateBestPreview();
+});
 $("mode").addEventListener("change", () => {
   if (state !== "ready" && state !== "over") {
     $("mode").value = game.mode;
     return;
   }
-  best = bests[$("mode").value];
-  $("best").textContent = `${best} m`;
+  updateBestPreview();
 });
+const skinButtons = new Map();
+for (const [id, skin] of Object.entries(SKINS)) {
+  const card = document.createElement("div");
+  card.className = "skin-card";
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.classList.add("skin-preview");
+  svg.setAttribute("viewBox", "-32 -42 64 58");
+  svg.setAttribute("aria-label", `${skin.name} preview`);
+  svg.setAttribute("role", "img");
+  for (const [points, fill] of [["-26,-3 26,-3 14,9 -15,9", skin.hull], ["-22,-4 -2,-39 -2,-4", skin.sail], ["0,-37 21,-5 0,-5", skin.fold]]) {
+    const shape = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+    shape.setAttribute("points", points);
+    shape.setAttribute("fill", fill);
+    svg.append(shape);
+  }
+  const title = document.createElement("div");
+  title.textContent = skin.name;
+  const button = document.createElement("button");
+  button.dataset.skin = id;
+  button.addEventListener("click", () => {
+    if (state !== "ready" && state !== "over") return;
+    try {
+      progress.chooseSkin(id);
+      $("shop-feedback").textContent = `${skin.name} selected.`;
+      renderProgress();
+      draw();
+    } catch (error) {
+      $("shop-feedback").textContent = error.message;
+      console.warn("Tiny Tide boat selection failed:", error);
+      renderProgress();
+    }
+  });
+  card.append(svg, title, button);
+  $("skins").append(card);
+  skinButtons.set(id, button);
+}
+function renderProgress() {
+  $("coin-bank").textContent = String(coinBank());
+  for (const [id, button] of skinButtons) {
+    const owned = progress.data.owned.includes(id);
+    button.textContent = progress.data.selected === id ? "Selected" : owned ? "Select" : `Unlock · ${SKINS[id].price} coins`;
+    button.setAttribute("aria-label", `${SKINS[id].name}: ${button.textContent}`);
+    button.disabled = !progress.persistent || (state !== "ready" && state !== "over") || progress.data.selected === id || (!owned && coinBank() < SKINS[id].price);
+  }
+  $("missions").replaceChildren(...MISSIONS.map(mission => {
+    const item = document.createElement("li");
+    const completed = progress.data.completed.includes(mission.id);
+    item.textContent = `${mission.label}: ${completed ? "Complete" : `${Math.min(mission.target, game[mission.metric])}/${mission.target}`} · ${mission.reward} coins${completed ? " paid" : " reward"}`;
+    return item;
+  }));
+  const next = MISSIONS.find(mission => !progress.data.completed.includes(mission.id));
+  $("mission-summary").textContent = next ? `${next.label} · ${Math.min(next.target, game[next.metric])}/${next.target}` : "All missions complete!";
+}
+$("studio").addEventListener("toggle", () => { if ($("studio").open) pause(); });
+renderProgress();
+updateBestPreview();
 $("sound").addEventListener("click", async () => {
   muted = !muted;
   sound.setMuted(muted);
@@ -109,18 +183,29 @@ function clearInput() {
 
 function start() {
   sound.stop();
-  game.reset($("mode").value);
-  best = bests[game.mode];
+  runCourse = $("course").value;
+  runDate = runCourse === "daily" ? utcDate() : null;
+  game.random = runDate ? dailyRandom(runDate) : Math.random;
+  game.reset(runDate ? "medium" : $("mode").value);
+  best = runDate ? progress.data.dailyBests[runDate] || 0 : bests[game.mode];
+  $("best").textContent = `${best} pts`;
   $("mode").disabled = true;
+  $("course").disabled = true;
+  $("daily-date").textContent = runDate ? `${runDate} UTC · fixed Medium` : "";
   resize();
   sparkles = [];
   feedbackTime = 0;
   wasHolding = false;
   lastTideSound = -Infinity;
   $("run-coins").textContent = "0";
+  $("flow").textContent = "Flow 0% · 1.00×";
+  $("combo").textContent = "Perfect pass: exit in the gold band.";
+  $("mission-feedback").textContent = "";
+  $("studio").open = false;
   $("coin-feedback").textContent = "Follow the gold. Find your flow.";
   clearInput();
   state = "running";
+  renderProgress();
   $("overlay").hidden = true;
   $("pause").disabled = false;
   $("pause").textContent = "Ⅱ";
@@ -172,19 +257,24 @@ function finish() {
   sound.stop();
   sound.play("finish");
   $("pause").disabled = true;
-  $("mode").disabled = false;
+  $("mode").disabled = runCourse === "daily";
+  $("course").disabled = false;
   $("tide").disabled = true;
   const record = game.score > best;
   if (record) {
     best = game.score;
-    bests[game.mode] = best;
-    $("best").textContent = `${best} m`;
-    save(`tiny-tide-best-${game.mode}`, best);
-    if (game.mode === "medium") save("tiny-tide-best", best);
+    $("best").textContent = `${best} pts`;
+    if (runDate) progress.recordDaily(runDate, best);
+    else {
+      bests[game.mode] = best;
+      save(`tiny-tide-best-${game.mode}`, best);
+      if (game.mode === "medium") save("tiny-tide-best", best);
+    }
   }
   const reason = game.failure === "rock" ? "A little too low. Hold earlier to clear the rocks." : "A little too high. Release earlier for the bridge.";
-  showOverlay(record ? `A NEW ${MODES[game.mode].label.toUpperCase()} BEST` : "EVERY TIDE TEACHES YOU", `${game.score} little metres.`, reason, "Float again →", `${game.collected} coins this run · ${coinBank} in your bank · Space to retry`);
-  $("announcement").textContent = `${game.score} metres. ${reason}`;
+  showOverlay(record ? `A NEW ${runDate ? "DAILY" : MODES[game.mode].label.toUpperCase()} BEST` : "EVERY TIDE TEACHES YOU", `${game.score} flow points.`, reason, "Float again →", `${Math.floor(game.distance / 10)} m · ${game.bonus} bonus points · ${game.collected} coins · Space to retry`);
+  $("announcement").textContent = `${game.score} points. ${reason}`;
+  renderProgress();
 }
 
 $("play").addEventListener("click", () => state === "paused" ? resume() : start());
@@ -203,7 +293,7 @@ for (const element of [canvas, $("tide")]) {
   element.addEventListener("contextmenu", event => event.preventDefault());
 }
 window.addEventListener("keydown", event => {
-  if (event.target instanceof HTMLSelectElement) return;
+  if (event.target instanceof HTMLSelectElement || (event.target instanceof Element && event.target.closest("#studio"))) return;
   if (event.code === "KeyP" || event.code === "Escape") {
     if (event.repeat) return;
     event.preventDefault();
@@ -239,23 +329,54 @@ function rounded(x, y, w, h, r, color) {
   ctx.fill();
 }
 
+const SCENES = [
+  { name: "Garden canal", sky: "#e5edde", cloud: "#dae5d3", tree: "#b8ceaf", bank: "#bfceae", water: "#67b5ab", deep: "#327f7c" },
+  { name: "Rainy streets", sky: "#c5d3d9", cloud: "#adbfc9", tree: "#879d9c", bank: "#a9b3a5", water: "#65a5b2", deep: "#356878" },
+  { name: "Moonlit water", sky: "#334958", cloud: "#425d6a", tree: "#607c79", bank: "#7c9385", water: "#619cac", deep: "#34566c" },
+];
+function mixColor(a, b, t) {
+  const channels = [1, 3, 5].map(offset => Math.round(parseInt(a.slice(offset, offset + 2), 16) * (1 - t) + parseInt(b.slice(offset, offset + 2), 16) * t));
+  return `rgb(${channels.join(",")})`;
+}
+
 function draw() {
   ctx.clearRect(0, 0, width, RULES.height);
-  ctx.fillStyle = "#e5edde";
+  const scene = sceneryState(game.elapsed);
+  const palette = key => mixColor(SCENES[scene.from][key], SCENES[scene.to][key], scene.blend);
+  $("scenery").textContent = SCENES[scene.blend < .5 ? scene.from : scene.to].name;
+  ctx.fillStyle = palette("sky");
   ctx.fillRect(0, 0, width, RULES.height);
   const scroll = game.distance;
+  if (scene.from >= 1) {
+    ctx.globalAlpha = scene.from === 2 ? 1 : scene.blend;
+    ctx.fillStyle = "#fff3c9";
+    ctx.beginPath(); ctx.arc(width - 80, 65, 20, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
   for (let i = -1; i < width / 180 + 2; i++) {
     const x = i * 180 - (scroll * .22 % 180);
-    rounded(x, 125 + Math.sin(i * 3) * 15, 125, 50, 25, "#dae5d3");
-    rounded(x + 40, 100 + Math.sin(i * 3) * 15, 70, 60, 30, "#dae5d3");
+    rounded(x, 125 + Math.sin(i * 3) * 15, 125, 50, 25, palette("cloud"));
+    rounded(x + 40, 100 + Math.sin(i * 3) * 15, 70, 60, 30, palette("cloud"));
     ctx.fillStyle = "#bfd2bb";
     ctx.fillRect(x + 60, 190, 3, 25);
-    path([[x + 61, 150], [x + 37, 197], [x + 85, 197]], "#b8ceaf");
-    path([[x + 111, 170], [x + 92, 207], [x + 130, 207]], "#c7d9bb");
+    path([[x + 61, 150], [x + 37, 197], [x + 85, 197]], palette("tree"));
+    path([[x + 111, 170], [x + 92, 207], [x + 130, 207]], palette("tree"));
+    if (scene.from === 1 || scene.to === 1) {
+      ctx.globalAlpha = scene.from === 0 ? scene.blend : 1 - scene.blend;
+      rounded(x + 25, 148, 55, 62, 3, "#8d9f9e");
+      rounded(x + 39, 160, 10, 15, 1, "#f5e6b7");
+      ctx.strokeStyle = "#eef9ff88"; ctx.lineWidth = 1;
+      for (let drop = 0; drop < 5; drop++) {
+        const dx = x + drop * 32;
+        const dy = reducedMotion ? 50 + drop * 20 : (visualTime * 90 + drop * 37) % 205;
+        ctx.beginPath(); ctx.moveTo(dx, dy); ctx.lineTo(dx - 5, dy + 12); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
   }
   ctx.fillStyle = "#d0ddc4";
   ctx.fillRect(0, 218, width, 382);
-  ctx.fillStyle = "#bfceae";
+  ctx.fillStyle = palette("bank");
   ctx.fillRect(0, 235, width, 365);
   for (let i = 0; i < width / 70 + 1; i++) {
     rounded(i * 70 - (scroll * .5 % 70), 247, 56, 9, 4, "#b0c39f");
@@ -283,10 +404,12 @@ function draw() {
     }
   }
   const water = ctx.createLinearGradient(0, y, 0, 600);
-  water.addColorStop(0, "#67b5abdd");
-  water.addColorStop(1, "#327f7cf2");
+  water.addColorStop(0, palette("water"));
+  water.addColorStop(1, palette("deep"));
+  ctx.globalAlpha = .9;
   ctx.fillStyle = water;
   ctx.fillRect(0, y, width, RULES.height - y);
+  ctx.globalAlpha = 1;
   ctx.beginPath();
   for (let x = 0; x <= width; x += 8) {
     const wy = y + (reducedMotion ? 0 : Math.sin(x / 42 + visualTime * 2) * 2);
@@ -333,15 +456,22 @@ function draw() {
     ctx.font = "bold 10px system-ui";
     ctx.textAlign = "center";
     ctx.fillText(next.type === "rock" ? "HOLD ↑" : "RELEASE ↓", labelX, labelY + 16);
+    const targetTop = next.type === "rock" ? next.edge - RULES.draft - 38 : next.edge + RULES.boatHeight + 12;
+    ctx.strokeStyle = "#fff1a7";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.strokeRect(next.x - scroll - 26, targetTop, 18, 26);
+    ctx.setLineDash([]);
   }
   ctx.save();
   ctx.translate(RULES.boatX, y);
+  const skin = SKINS[progress.data.selected];
   ctx.fillStyle = "#27696235";
   ctx.beginPath(); ctx.ellipse(0, 18, 38, 6, 0, 0, Math.PI * 2); ctx.fill();
   path([[-26, -3], [26, -3], [14, 9], [-15, 9]], "#f5ecd4", "#e0d4b8");
-  path([[-22, -4], [-2, -39], [-2, -4]], "#fffbed");
-  path([[0, -37], [21, -5], [0, -5]], "#e8d9ba");
-  path([[-26, -3], [0, 3], [26, -3], [14, 9], [-15, 9]], "#ebad70");
+  path([[-22, -4], [-2, -39], [-2, -4]], skin.sail);
+  path([[0, -37], [21, -5], [0, -5]], skin.fold);
+  path([[-26, -3], [0, 3], [26, -3], [14, 9], [-15, 9]], skin.hull);
   ctx.restore();
   rounded(20, 240, 6, 235, 3, "#eff7e651");
   rounded(20, y - 4, 6, 8, 3, "#fff5d6");
@@ -353,6 +483,7 @@ function frame(time) {
   if (state === "running") {
     visualTime += dt;
     game.update(dt, holding());
+    $("flow").textContent = `Flow ${Math.round(game.progression * 100)}% · ${(game.speed / game.difficulty.startSpeed).toFixed(2)}×`;
     if (holding() !== wasHolding) {
       if (visualTime - lastTideSound > .25) {
         sound.play(holding() ? "rise" : "fall");
@@ -361,10 +492,15 @@ function frame(time) {
       wasHolding = holding();
     }
     sparkles = sparkles.filter(sparkle => (sparkle.life -= dt) > 0);
+    if (game.pickups.length || game.passEvents.length) {
+      const earned = progress.recordRun(game, game.pickups.length);
+      if (earned.length) {
+        $("mission-feedback").textContent = earned.map(mission => `${mission.label} complete! +${mission.reward} coins.`).join(" ");
+        $("announcement").textContent = $("mission-feedback").textContent;
+      }
+      renderProgress();
+    }
     if (game.pickups.length) {
-      coinBank = Math.min(Number.MAX_SAFE_INTEGER, coinBank + game.pickups.length);
-      save("tiny-tide-coins", coinBank);
-      $("coin-bank").textContent = String(coinBank);
       $("run-coins").textContent = String(game.collected);
       $("coin-feedback").textContent = `+${game.pickups.length} coin${game.pickups.length === 1 ? "" : "s"} · Nice catch!`;
       feedbackTime = 1.4;
@@ -373,6 +509,12 @@ function frame(time) {
     } else if (feedbackTime > 0) {
       feedbackTime -= dt;
       if (feedbackTime <= 0) $("coin-feedback").textContent = "Follow the gold. Find your flow.";
+    }
+    for (const pass of game.passEvents) {
+      $("combo").textContent = pass.perfect
+        ? `Perfect! Combo ${pass.combo} · +${pass.bonus} points`
+        : "Safe passage · combo reset. Aim for the gold band.";
+      if (pass.perfect) sound.play("perfect");
     }
     $("score").textContent = String(game.score);
     const next = game.next;

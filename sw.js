@@ -1,6 +1,6 @@
 const CACHE_PREFIX = `tiny-tide:${self.registration.scope}:`;
-const CACHE = `${CACHE_PREFIX}v1`;
-const FILES = ["./", "./index.html", "./style.css", "./app.js", "./engine.js", "./sound.js", "./manifest.webmanifest", "./icon.svg"];
+const CACHE = `${CACHE_PREFIX}v5`;
+const FILES = ["./", "./index.html", "./style.css", "./app.js", "./engine.js", "./sound.js", "./progress.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(FILES)).then(() => self.skipWaiting()));

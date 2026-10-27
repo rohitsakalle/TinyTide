@@ -12,7 +12,7 @@ $types = @{
     '.html' = 'text/html'; '.css' = 'text/css'; '.js' = 'text/javascript'
     '.svg' = 'image/svg+xml'; '.webmanifest' = 'application/manifest+json'
 }
-$allowed = @('index.html', 'style.css', 'app.js', 'engine.js', 'sound.js', 'sw.js', 'icon.svg', 'manifest.webmanifest', 'tests.html', 'tests.js')
+$allowed = @('index.html', 'style.css', 'app.js', 'engine.js', 'sound.js', 'progress.js', 'sw.js', 'icon.svg', 'manifest.webmanifest', 'tests.html', 'tests.js')
 try {
     $listener.Start()
     Write-Host "Tiny Tide is ready at http://localhost:$Port"
