@@ -547,7 +547,9 @@ export async function runBrowserTests() {
     iframe.onload = resolve;
     iframe.onerror = () => reject(new Error("Integration frame failed to load"));
   });
-  const storageKeys = ["tiny-tide-best", "tiny-tide-best-easy", "tiny-tide-best-medium", "tiny-tide-best-fast", ...["easy", "medium", "fast"].map(scoreKey), "tiny-tide-coins", "tiny-tide-muted", PROGRESS_KEY];
+  const storageKeys = ["tiny-tide-best", "tiny-tide-best-easy", "tiny-tide-best-medium", "tiny-tide-best-fast",
+    ...["easy", "medium", "fast"].map(mode => `tiny-tide-best-tide-boost-2-${mode}`),
+    ...["easy", "medium", "fast"].map(scoreKey), "tiny-tide-coins", "tiny-tide-muted", PROGRESS_KEY];
   const originals = new Map(storageKeys.map(key => [key, localStorage.getItem(key)]));
   for (const key of storageKeys) localStorage.removeItem(key);
   localStorage.setItem("tiny-tide-best", "37");
