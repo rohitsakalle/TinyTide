@@ -22,33 +22,48 @@ const isDate = value => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(
   && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const validCounts = value => isObject(value) && METRICS.every(metric => isCount(value[metric]));
+const validDailyScores = value => isObject(value)
+  && Object.entries(value).every(([date, score]) => isDate(date) && isCount(score));
 const newRunId = () => Array.from(crypto.getRandomValues(new Uint32Array(4)), word => word.toString(16).padStart(8, "0")).join("-");
 
 const isCount = value => Number.isSafeInteger(value) && value >= 0;
 const fresh = coins => ({
-  version: 2, coins, owned: ["paper"], selected: "paper", completed: [], dailyBests: {},
+  version: 3, coins, owned: ["paper"], selected: "paper", completed: [], dailyBests: {}, legacyDailyBests: {},
   totals: counts(), dailyGoals: {}, runs: {},
 });
 
 function decode(raw) {
   const data = JSON.parse(raw);
-  if (!data || ![1, 2].includes(data.version) || !isCount(data.coins)
+  if (!data || ![1, 2, 3].includes(data.version) || !isCount(data.coins)
     || !Array.isArray(data.owned) || !data.owned.includes("paper") || data.owned.some(id => !Object.hasOwn(SKINS, id))
     || !data.owned.includes(data.selected) || !Array.isArray(data.completed)
     || data.completed.some(id => !MISSIONS.some(mission => mission.id === id))
-    || !data.dailyBests || Array.isArray(data.dailyBests) || typeof data.dailyBests !== "object"
-    || Object.entries(data.dailyBests).some(([date, score]) => !isDate(date) || !isCount(score))) {
+    || !validDailyScores(data.dailyBests)) {
     throw new Error("Saved progress is invalid. Existing data has not been overwritten.");
   }
-  if (data.version === 1) {
-    // Bank includes rewards and spending; it cannot tell us historical pickup totals.
-    return { ...fresh(data.coins), ...data, version: 2, totals: counts(), dailyGoals: {}, runs: {} };
-  }
-  if (!validCounts(data.totals) || !isObject(data.dailyGoals) || !isObject(data.runs)
+  if (data.version >= 2 && (!validCounts(data.totals) || !isObject(data.dailyGoals) || !isObject(data.runs)
     || Object.entries(data.dailyGoals).some(([date, goal]) => !isDate(date) || !validCounts(goal)
       || !Array.isArray(goal.claimed) || goal.claimed.some(id => !METRICS.includes(id)))
-    || Object.entries(data.runs).some(([id, run]) => !/^[a-zA-Z0-9-]{1,80}$/.test(id) || !isDate(run.date) || !validCounts(run))) {
+    || Object.entries(data.runs).some(([id, run]) => !/^[a-zA-Z0-9-]{1,80}$/.test(id) || !isDate(run.date) || !validCounts(run)))) {
     throw new Error("Saved goals or mastery are invalid. Existing data has not been overwritten.");
+  }
+  if (data.version < 3) {
+    // Boosted runs use a new score ruleset; retain old daily records without comparing them.
+    const legacyDailyBests = { ...(data.legacyDailyBests || {}), ...data.dailyBests };
+    if (!validDailyScores(legacyDailyBests)) throw new Error("Saved prior-rule records are invalid. Existing data has not been overwritten.");
+    return {
+      ...fresh(data.coins),
+      ...data,
+      version: 3,
+      dailyBests: {},
+      legacyDailyBests,
+      totals: data.version === 1 ? counts() : data.totals,
+      dailyGoals: data.version === 1 ? {} : data.dailyGoals,
+      runs: data.version === 1 ? {} : data.runs,
+    };
+  }
+  if (!validDailyScores(data.legacyDailyBests)) {
+    throw new Error("Saved prior-rule records are invalid. Existing data has not been overwritten.");
   }
   return data;
 }

@@ -39,6 +39,7 @@ small { font-size: 14px; margin-left: 4px; color: #789087; }
 #missions, #daily-missions, #mastery { padding-left: 20px; line-height: 2; }
 #share-text { display: block; width: 100%; margin-top: 8px; padding: 10px; font: inherit; line-height: 1.6; color: #204443; background: #f5f3e9; border: 1px solid #b8cdb9; border-radius: 8px; resize: vertical; }
 #share-text:focus-visible { outline: 3px solid #d27b43; outline-offset: 2px; }
+#previous-best { color: #788a7b; font-size: 10px; }
 .coin-bar b { color: #795722; font-variant-numeric: tabular-nums; }
 .coin-totals { display: inline-flex; gap: 10px; align-items: center; white-space: nowrap; }
 .coin-symbol { color: #c89430; }
@@ -60,12 +61,17 @@ h1 { font-size: clamp(39px, 5.2vw, 65px); letter-spacing: -3px; line-height: .98
 .primary:hover { background: #2f7062; }
 .overlay-hint { font-size: 11px; color: #6a857a; margin: 14px 0 0; }
 .water-label { position: absolute; bottom: 20px; left: 25px; pointer-events: none; color: #ecfff3b3; letter-spacing: 3px; font-size: 8px; }
+.impact-label { position: absolute; z-index: 2; left: 50%; top: 43%; transform: translate(-50%, -50%); padding: 8px 18px; border: 1px solid #fff4d8; border-radius: 20px; color: #315d58; background: #f7f2dcdd; font-size: 11px; font-weight: 900; letter-spacing: 3px; pointer-events: none; animation: impact-pop .58s ease-out both; }
+@keyframes impact-pop { from { opacity: .5; translate: 0 5px; } to { opacity: 1; translate: 0 0; } }
 .control-bar { display: flex; justify-content: space-around; align-items: center; gap: 12px; min-height: 86px; padding: 12px 25px; }
 .control-tip { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #698278; }
 .control-tip b { color: #30584e; }
 .key { border: 1px solid #d8dfd3; border-radius: 9px; padding: 9px 12px; color: #3a695c; font-size: 16px; }
-.tide-button { touch-action: none; user-select: none; -webkit-user-select: none; border: 1px solid #cddcd0; border-radius: 24px; color: #2c6557; background: #e8eee1; padding: 13px 22px; font-size: 10px; font-weight: 800; letter-spacing: 1.4px; white-space: nowrap; }
+.hold-controls { display: flex; flex: 1 1 420px; justify-content: center; gap: 10px; min-width: 0; }
+.tide-button, .boost-button { flex: 1 1 190px; min-height: 52px; touch-action: none; user-select: none; -webkit-user-select: none; border: 1px solid #cddcd0; border-radius: 24px; color: #2c6557; background: #e8eee1; padding: 13px 16px; font-size: 10px; font-weight: 800; letter-spacing: 1.1px; white-space: nowrap; }
 .tide-button.active { background: #2c6557; color: #fff; transform: translateY(2px); }
+.boost-button { color: #76521e; border-color: #e6d5aa; background: #f8edcc; }
+.boost-button.active { background: #a97428; color: #fffdf5; transform: translateY(2px); }
 footer { display: flex; justify-content: space-between; gap: 12px; margin: 19px 3px 0; font-size: 10px; }
 .notice { text-align: center; margin: 12px 0; min-height: 14px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
@@ -92,7 +98,8 @@ footer { display: flex; justify-content: space-between; gap: 12px; margin: 19px 
   #mission-summary { display: block; margin-left: 0; }
   .playfield { height: clamp(330px, 48svh, 520px); }
   .control-bar { flex-wrap: wrap; gap: 10px; padding: 13px 8px; }
-  .tide-button { order: -1; width: 88%; padding: 15px; }
+  .hold-controls { order: -1; flex: 1 0 100%; width: 100%; gap: 8px; }
+  .tide-button, .boost-button { flex: 1 1 0; min-width: 0; min-height: 54px; padding: 12px 5px; font-size: 9px; letter-spacing: .5px; }
   .control-tip { font-size: 10px; gap: 5px; }
   .key { padding: 3px 7px; font-size: 12px; }
   footer { font-size: 9px; gap: 8px; line-height: 1.5; }
@@ -104,4 +111,4 @@ footer { display: flex; justify-content: space-between; gap: 12px; margin: 19px 
   .playfield { height: 300px; }
   .control-bar { min-height: 55px; }
 }
-@media (prefers-reduced-motion: reduce) { .overlay { backdrop-filter: none; } }
+@media (prefers-reduced-motion: reduce) { .overlay { backdrop-filter: none; } .impact-label { animation: none; } }

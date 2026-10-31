@@ -2,8 +2,10 @@
 
 A touch-first, one-button endless canal game. You control the water, not the boat:
 hold to rise over rocks, release to slip under bridges. Anticipate the next
-obstacle; the tide takes time to move. A collision ends your run, with an
-immediate retry and a local personal best.
+obstacle; the tide takes time to move. A collision bursts the paper boat into
+clearly visible, outlined fragments with an expanding splash for 1.4 seconds
+before results, retry and your local personal best. Reduced-motion mode uses a
+shorter .35-second, low-motion burst.
 
 Choose **Easy**, **Medium**, or **Fast** with the Pace selector before starting.
 Medium keeps the original pace. Each mode has a separate distance record; old
@@ -11,14 +13,27 @@ records are retained as Medium records. Pace is locked while running or paused,
 and can be changed after a collision. Speed ramps smoothly over **90 active
 seconds** from 105 to 165 world-pixels/s on Easy, 145 to 220 on Medium, and 190
 to 275 on Fast. Flow displays ramp progress and the current speed multiplier.
-Pause/background time does not advance it; retry resets it.
+Hold **Hold to Boost** or **Right Arrow** for up to 1.35× forward speed without
+affecting the tide. Releasing returns to the current pace; near an obstacle,
+boost protection maintains enough warning for a full tide transition. Boost
+never makes an existing hazard harder to reach. Pause, focus loss, touch
+cancellation, impact and retry clear boost. On phones, hold the boost and tide
+buttons simultaneously with two fingers. Pause/background time does not advance
+the ramp; retry resets it.
 
 Newly generated hazards gradually get wider and demand higher water over rocks
-and lower water under bridges. Alternation becomes more frequent and the gaps
-shrink, but retain a full-height transition, 0.25s reaction allowance, boat
-overlap and the first coin's approach distance at the mode's maximum future
-speed. The visible world gives at least a full transition plus 0.5s warning at
-that speed. Existing obstacles never change shape as they approach.
+and lower water under bridges. Patterns tighten by deterministic course order,
+not boost timing, so a UTC Daily seed always gives the same obstacle and coin
+layout. Gaps retain a full-height transition, reaction time, boat overlap and
+coin approach at maximum boosted speed. The visible world gives at least a
+full transition plus 0.5s warning. Near a visible hazard, boost protection
+returns speed toward the selected pace rather than shortening the warning.
+
+Rocks are layered, mossy canal stones; bridges are textured masonry with
+visible lintels and joints. Scene palettes follow the garden, rainy street and
+moonlit scenery. Decorative faces stay inside the existing collision
+silhouettes: rocks remain blocks rising from below, and bridge ceilings end at
+the same safe-passage edge as before. No asset downloads or external art are used.
 
 Gold coin trails follow safe routes over rocks and under bridges. Collect them
 with the boat for a floating `+1`, a pickup chime and a run count. The **Coin
@@ -31,7 +46,7 @@ reselected for free. Selection is locked during runs and pauses. Hull/sail color
 size, coin collection or scoring. There is no cash value, real-money payment or
 account sync. Records, coins and sound preference are local to this browser.
 
-Existing coin balances and version-1 saves migrate into version 2 of the same
+Existing coin balances and earlier saves migrate into version 3 of the same
 `tiny-tide-progress-v1` storage key, preserving bank, owned/selected boats,
 original completed missions and recent daily records. New cumulative metrics
 start at zero: the old bank mixes pickups, rewards and spending, and there is no
@@ -106,7 +121,8 @@ Choose **Daily** before starting for a date-labeled, UTC-seeded endless course.
 It always uses the same Medium starting profile and progression; pace selection
 is disabled. Everyone on the same game version and UTC date gets the same
 obstacle/coin course. Fixed 120Hz physics ticks keep generation independent of
-display frame timing. Retry restarts that day's seed, not a fresh random route.
+display frame timing and boost input. Retry restarts that day's seed, not a
+fresh random route.
 
 Daily bests are separate from all Endless records, with the most recent 14 dates
 retained locally. A run crossing UTC midnight keeps its original date and record
@@ -122,9 +138,13 @@ failed sharing offers a separate Copy result action and selectable manual text;
 cancelling a share doesn't copy anything. Clipboard permission errors are
 explained, not reported as success. The result freezes the run's UTC date, score,
 distance, bonus, pickups, clears and perfect passes, plus the game URL, fixed
-Medium profile and **`tide-course-1`** course/physics/scoring rules version.
-Compare only matching dates and versions. Increase `DAILY_RULES` in `sharing.js`
-when competitive rules change. There is no live leaderboard, automatic sharing,
+Medium profile and **`tide-boost-2`** course/physics/scoring rules version.
+Boost changes possible score pace, so prior daily bests are retained separately
+in `legacyDailyBests` and never compared as if they used the same rules. Existing
+Endless best keys remain untouched and are labeled as archived previous-rule
+records; new bests use versioned keys. Compare only matching dates and versions.
+Increase `DAILY_RULES` in `sharing.js` when competitive rules change. There is
+no live leaderboard, automatic sharing,
 account lookup or remote score service. Rewards and cosmetics do not alter
 competitive scores or the seeded course.
 
@@ -153,9 +173,11 @@ local scripts for that server process only (no system policy change).
 Alternatively, use an approved local static server. With Python installed:
 `python -m http.server 4173 --bind 127.0.0.1` from this folder.
 
-Touch/hold the game area or the Hold to Rise button. Desktop: hold **Space** or
-**Up arrow**, release to lower; **P / Escape** pauses. Start/retry with the button
-or Space. Switching apps or tabs pauses automatically; resuming is explicit.
+Touch/hold the game area or **Hold to Rise**; release to lower. Hold the separate
+**Hold to Boost** button to go faster. Desktop: hold **Space / Up arrow** to
+raise water and **Right Arrow** to boost independently; **P / Escape** pauses.
+Start/retry with the button or Space. Switching apps or tabs pauses automatically;
+resuming is explicit.
 
 For a phone on the same trusted Wi-Fi, run `.\serve.ps1 -Lan`, then open
 `http://YOUR-PC-LAN-IP:4173`. Allow only necessary private-network firewall
@@ -195,8 +217,11 @@ ramps, perfect combos, cosmetic spending and failed-save safety, one-time missio
 rewards, daily reproducibility at multiple frame rates, UTC rollover and frozen
 mission dates, version-1 migrations, reward idempotency, spending-independent
 mastery, run comparisons, native-share cancel/failure and copy/manual paths,
-separate daily records, scenery, and sound unlock/mute/error flows in an isolated game
-frame. The UI tests restore the prior local data afterward; don't play in another
+boosted-speed reachability and Daily layout invariance under boost schedules,
+crash/results ordering and one-time settlement, multitouch boost/tide and
+keyboard release, reduced-motion and muted crash behavior, new best-rule
+migration, separate daily records, scenery, and sound unlock/mute/error flows
+in an isolated game frame. The UI tests restore the prior local data afterward; don't play in another
 tab while the isolated tests run. Sound lifecycle tests use a deterministic Web
 Audio double, plus real Web Audio offline rendering to check non-silent output
 and cancellation. Real-device speaker quality and browser gesture policy still

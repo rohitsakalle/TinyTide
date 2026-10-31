@@ -25,7 +25,7 @@
       <div class="coin-bar">
         <label class="mode-label" for="course">Course <select id="course"><option value="endless">Endless</option><option value="daily">Daily</option></select></label>
         <label class="mode-label" for="mode">Pace <select id="mode"><option value="easy">Easy</option><option value="medium" selected>Medium</option><option value="fast">Fast</option></select></label>
-        <span id="daily-date" hidden></span><span id="flow" aria-label="Run progression">Flow 0% · 1.00×</span>
+        <span id="daily-date" hidden></span><span id="previous-best" hidden></span><span id="flow" aria-label="Run progression">Flow 0% · 1.00×</span>
         <span class="coin-totals"><span class="coin-symbol" aria-hidden="true">●</span><span>This run <b id="run-coins">0</b></span><span>Coin bank <b id="coin-bank">0</b></span></span>
         <span id="coin-feedback" role="status" aria-live="polite">Follow the gold. Find your flow.</span>
       </div>
@@ -40,11 +40,15 @@
           <button id="play" class="primary">Let's float →</button>
           <p class="overlay-hint" id="overlay-hint">Hold to rise. Release to fall.</p>
         </div>
+        <div class="impact-label" id="impact" hidden>SPLASH!</div>
         <div class="water-label" aria-hidden="true">THE TIDE IS YOURS</div>
       </div>
       <div class="control-bar">
         <div class="control-tip"><span class="key">↑</span><span><b>Hold</b> to float over rocks</span></div>
-        <button id="tide" class="tide-button" aria-label="Hold to raise water; release to lower" disabled>HOLD TO RISE ↑</button>
+        <div class="hold-controls">
+          <button id="tide" class="tide-button" aria-label="Hold to raise water; release to lower" disabled>HOLD TO RISE ↑</button>
+          <button id="boost" class="boost-button" aria-label="Hold to boost forward; release to coast" aria-pressed="false" disabled>HOLD TO BOOST →</button>
+        </div>
         <div class="control-tip"><span class="key">↓</span><span><b>Release</b> for low bridges</span></div>
       </div>
     </section>
@@ -85,7 +89,7 @@
       <ul id="missions"></ul>
       <p id="mission-feedback" role="status" aria-live="polite"></p>
     </details>
-    <footer><span>A little anticipation goes a long way.</span><span id="connection" role="status">Preparing offline play…</span><span class="desktop-hint">SPACE / ↑ to rise · P to pause</span></footer>
+    <footer><span>A little anticipation goes a long way.</span><span id="connection" role="status">Preparing offline play…</span><span class="desktop-hint">SPACE / ↑ to rise · → to boost · P to pause</span></footer>
     <p class="notice" id="notice" role="status"></p>
     <p class="sr-only" id="announcement" role="status" aria-live="polite"></p>
   </main>

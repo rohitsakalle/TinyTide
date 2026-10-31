@@ -21,23 +21,32 @@ let runBest = 0;
 let lastResult = null;
 let shownGoalDate = null;
 const bests = { easy: 0, medium: 0, fast: 0 };
+const previousBests = { easy: 0, medium: 0, fast: 0 };
 let muted = false;
 let sparkles = [];
 let feedbackTime = 0;
 let wasHolding = false;
+let wasBoosting = false;
+let crashTime = 0;
+let crashDuration = 0;
+let crashOrigin = null;
 let lastTideSound = -Infinity;
 let storageAvailable = true;
-const pointers = new Set();
-const keys = new Set();
-const holding = () => pointers.size > 0 || keys.size > 0;
+const tidePointers = new Set();
+const boostPointers = new Set();
+const tideKeys = new Set();
+const boostKeys = new Set();
+const holding = () => tidePointers.size > 0 || tideKeys.size > 0;
+const boosting = () => boostPointers.size > 0 || boostKeys.size > 0;
+const bestKey = mode => `tiny-tide-best-${DAILY_RULES}-${mode}`;
 
 try {
-  const saved = Number(localStorage.getItem("tiny-tide-best") || 0);
-  best = Number.isFinite(saved) && saved > 0 ? Math.floor(saved) : 0;
   for (const mode of Object.keys(MODES)) {
-    const stored = localStorage.getItem(`tiny-tide-best-${mode}`);
+    const stored = localStorage.getItem(bestKey(mode));
     const value = Number(stored);
-    bests[mode] = stored !== null && Number.isSafeInteger(value) && value >= 0 ? value : mode === "medium" ? best : 0;
+    bests[mode] = stored !== null && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+    const old = Number(localStorage.getItem(`tiny-tide-best-${mode}`) || (mode === "medium" ? localStorage.getItem("tiny-tide-best") : 0));
+    previousBests[mode] = Number.isSafeInteger(old) && old > 0 ? old : 0;
   }
   best = bests.medium;
   muted = localStorage.getItem("tiny-tide-muted") === "true";
@@ -83,8 +92,12 @@ function updateBestPreview() {
   const daily = $("course").value === "daily";
   best = daily ? progress.data.dailyBests[utcDate()] || 0 : bests[$("mode").value];
   $("best").textContent = `${best} pts`;
+  const legacyDaily = progress.data.legacyDailyBests[utcDate()];
+  const previous = daily ? legacyDaily : previousBests[$("mode").value];
+  $("previous-best").hidden = !previous;
+  $("previous-best").textContent = previous ? `Previous rules: ${previous} pts · archived, not compared` : "";
   $("daily-date").hidden = !daily;
-  $("daily-date").textContent = `${utcDate()} UTC · fixed Medium`;
+  $("daily-date").textContent = `${utcDate()} UTC · fixed Medium · ${DAILY_RULES}`;
   $("mode").disabled = daily;
 }
 $("course").addEventListener("change", () => {
@@ -203,13 +216,20 @@ function resize() {
 new ResizeObserver(resize).observe(canvas);
 
 function clearInput() {
-  pointers.clear();
-  keys.clear();
+  tidePointers.clear();
+  boostPointers.clear();
+  tideKeys.clear();
+  boostKeys.clear();
   $("tide").classList.remove("active");
+  $("boost").classList.remove("active");
+  $("boost").setAttribute("aria-pressed", "false");
 }
 
 function start() {
   sound.stop();
+  crashTime = 0;
+  crashOrigin = null;
+  $("impact").hidden = true;
   goalDate = utcDate();
   runId = progress.beginRun(goalDate);
   runCourse = $("course").value;
@@ -226,11 +246,12 @@ function start() {
   $("best").textContent = `${best} pts`;
   $("mode").disabled = true;
   $("course").disabled = true;
-  $("daily-date").textContent = runDate ? `${runDate} UTC · fixed Medium` : "";
+  $("daily-date").textContent = runDate ? `${runDate} UTC · fixed Medium · ${DAILY_RULES}` : "";
   resize();
   sparkles = [];
   feedbackTime = 0;
   wasHolding = false;
+  wasBoosting = false;
   lastTideSound = -Infinity;
   $("run-coins").textContent = "0";
   $("flow").textContent = "Flow 0% · 1.00×";
@@ -246,6 +267,7 @@ function start() {
   $("pause").textContent = "Ⅱ";
   $("pause").setAttribute("aria-label", "Pause game");
   $("tide").disabled = false;
+  $("boost").disabled = false;
   $("announcement").textContent = "Let's float. Hold to rise over the first rock.";
   lastTime = performance.now();
   canvas.focus({ preventScroll: true });
@@ -267,6 +289,7 @@ function pause() {
   clearInput();
   sound.stop();
   $("tide").disabled = true;
+  $("boost").disabled = true;
   $("pause").textContent = "▶";
   $("pause").setAttribute("aria-label", "Resume game");
   showOverlay("TAKE A BREATHER", "A moment of calm.", "Your little boat will wait right here.", "Keep floating →", "Press P or Space to resume.");
@@ -280,6 +303,7 @@ function resume() {
   lastTime = performance.now();
   $("overlay").hidden = true;
   $("tide").disabled = false;
+  $("boost").disabled = false;
   $("pause").textContent = "Ⅱ";
   $("pause").setAttribute("aria-label", "Pause game");
   canvas.focus({ preventScroll: true });
@@ -287,14 +311,17 @@ function resume() {
 }
 
 function finish() {
+  if (state !== "crashing") return;
   state = "over";
   clearInput();
+  $("impact").hidden = true;
   sound.stop();
-  sound.play("finish");
+  if (!document.hidden) sound.play("finish");
   $("pause").disabled = true;
   $("mode").disabled = runCourse === "daily";
   $("course").disabled = false;
   $("tide").disabled = true;
+  $("boost").disabled = true;
   const record = game.score > runBest;
   if (record) {
     best = game.score;
@@ -302,8 +329,8 @@ function finish() {
     if (runDate) progress.recordDaily(runDate, best);
     else {
       bests[game.mode] = best;
-      save(`tiny-tide-best-${game.mode}`, best);
-      if (game.mode === "medium") save("tiny-tide-best", best);
+      save(bestKey(game.mode), best);
+      bests[game.mode] = best;
     }
   }
   const reason = game.failure === "rock" ? "A little too low. Hold earlier to clear the rocks." : "A little too high. Release earlier for the bridge.";
@@ -315,6 +342,23 @@ function finish() {
   $("share-options").hidden = !runDate;
   $("announcement").textContent = `${game.score} points. ${reason} ${$("result-comparison").textContent} ${$("result-goal").textContent}`;
   renderProgress();
+  updateBestPreview();
+}
+
+function beginCrash() {
+  if (!game.failure || !["running", "paused"].includes(state)) return;
+  state = "crashing";
+  clearInput();
+  crashTime = 0;
+  crashDuration = reducedMotion ? .35 : 1.4;
+  crashOrigin = { y: waterY(game.lift) };
+  $("impact").hidden = false;
+  $("tide").disabled = true;
+  $("boost").disabled = true;
+  $("pause").disabled = true;
+  $("announcement").textContent = "Splash! Your boat broke apart. Showing your score in a moment.";
+  sound.stop();
+  sound.play("crash");
 }
 
 function nextGoalText(date) {
@@ -344,18 +388,22 @@ for (const [id, action] of [["share-result", shareDaily], ["copy-result", copyDa
 }
 $("share-text").addEventListener("focus", () => $("share-text").select());
 
-$("play").addEventListener("click", () => state === "paused" ? resume() : start());
+$("play").addEventListener("click", () => state === "paused" ? resume() : state === "crashing" ? undefined : start());
 $("pause").addEventListener("click", () => state === "paused" ? resume() : pause());
-for (const element of [canvas, $("tide")]) {
+for (const element of [canvas, $("tide"), $("boost")]) {
+  const boostControl = element === $("boost");
   element.addEventListener("pointerdown", event => {
     if (event.button !== 0 || state !== "running") return;
     event.preventDefault();
     element.setPointerCapture(event.pointerId);
-    pointers.add(event.pointerId);
+    (boostControl ? boostPointers : tidePointers).add(event.pointerId);
     sound.unlock();
   });
   for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) {
-    element.addEventListener(name, event => pointers.delete(event.pointerId));
+    element.addEventListener(name, event => {
+      tidePointers.delete(event.pointerId);
+      boostPointers.delete(event.pointerId);
+    });
   }
   element.addEventListener("contextmenu", event => event.preventDefault());
 }
@@ -368,17 +416,33 @@ window.addEventListener("keydown", event => {
     else if (state === "paused") resume();
     return;
   }
+  if (event.code === "ArrowRight" || (event.code === "Space" && event.target === $("boost"))) {
+    if (event.repeat) return;
+    event.preventDefault();
+    if (state === "running") boostKeys.add(event.code);
+    return;
+  }
   if (!["Space", "ArrowUp"].includes(event.code)) return;
   if (event.code === "Space" && event.target instanceof HTMLButtonElement && event.target !== $("tide")) return;
   event.preventDefault();
   if (event.repeat) return;
+  if (state === "crashing") return;
   if (state === "paused") resume();
   else if (state !== "running") start();
-  keys.add(event.code);
+  tideKeys.add(event.code);
 });
-window.addEventListener("keyup", event => keys.delete(event.code));
-window.addEventListener("blur", () => { pause(); sound.stop(); });
-document.addEventListener("visibilitychange", () => { if (document.hidden) { pause(); sound.stop(); } });
+window.addEventListener("keyup", event => {
+  tideKeys.delete(event.code);
+  boostKeys.delete(event.code);
+});
+function leaveGame() {
+  if (state === "crashing") finish();
+  else pause();
+  clearInput();
+  sound.stop();
+}
+window.addEventListener("blur", leaveGame);
+document.addEventListener("visibilitychange", () => { if (document.hidden) leaveGame(); });
 
 function path(points, fill, stroke) {
   ctx.beginPath();
@@ -397,13 +461,121 @@ function rounded(x, y, w, h, r, color) {
 }
 
 const SCENES = [
-  { name: "Garden canal", sky: "#e5edde", cloud: "#dae5d3", tree: "#b8ceaf", bank: "#bfceae", water: "#67b5ab", deep: "#327f7c" },
-  { name: "Rainy streets", sky: "#c5d3d9", cloud: "#adbfc9", tree: "#879d9c", bank: "#a9b3a5", water: "#65a5b2", deep: "#356878" },
-  { name: "Moonlit water", sky: "#334958", cloud: "#425d6a", tree: "#607c79", bank: "#7c9385", water: "#619cac", deep: "#34566c" },
+  { name: "Garden canal", sky: "#e5edde", cloud: "#dae5d3", tree: "#b8ceaf", bank: "#bfceae", water: "#67b5ab", deep: "#327f7c", stone: "#778b72", stoneLight: "#a6ae86", stoneDark: "#4c6557", moss: "#70996a", bridge: "#9b7958", bridgeLight: "#d0ad78", bridgeDark: "#614b3c" },
+  { name: "Rainy streets", sky: "#c5d3d9", cloud: "#adbfc9", tree: "#879d9c", bank: "#a9b3a5", water: "#65a5b2", deep: "#356878", stone: "#748d91", stoneLight: "#a0b0aa", stoneDark: "#435f6a", moss: "#718f7e", bridge: "#7d8584", bridgeLight: "#c2b893", bridgeDark: "#4c5d64" },
+  { name: "Moonlit water", sky: "#334958", cloud: "#425d6a", tree: "#607c79", bank: "#7c9385", water: "#619cac", deep: "#34566c", stone: "#586f74", stoneLight: "#879994", stoneDark: "#344e5b", moss: "#718c7a", bridge: "#676f73", bridgeLight: "#a4a287", bridgeDark: "#394d59" },
 ];
 function mixColor(a, b, t) {
   const channels = [1, 3, 5].map(offset => Math.round(parseInt(a.slice(offset, offset + 2), 16) * (1 - t) + parseInt(b.slice(offset, offset + 2), 16) * t));
   return `rgb(${channels.join(",")})`;
+}
+
+function drawRock(obstacle, x, palette) {
+  const edge = obstacle.edge;
+  const w = obstacle.width;
+  path([[x - 6, 552], [x + 1, edge + 33], [x + 10, edge + 21], [x + 22, edge], [x + 38, edge + 8], [x + 49, edge + 2], [x + w - 5, edge + 27], [x + w + 9, 552]], palette("stoneDark"), "#40574e");
+  path([[x + 3, 550], [x + 6, edge + 34], [x + 22, edge], [x + 38, edge + 8], [x + 48, edge + 3], [x + 54, edge + 25], [x + 35, edge + 39], [x + 20, edge + 30]], palette("stoneLight"));
+  path([[x + 38, edge + 9], [x + 49, edge + 3], [x + w - 5, edge + 27], [x + w + 5, 550], [x + 37, 550], [x + 29, edge + 39]], palette("stone"));
+  path([[x + 11, edge + 21], [x + 22, edge + 5], [x + 26, edge + 26], [x + 17, edge + 32]], palette("stone"));
+  ctx.strokeStyle = "#344d4399";
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 3; i++) {
+    const tx = x + 17 + i * Math.max(12, (w - 36) / 3);
+    ctx.beginPath();
+    ctx.moveTo(tx, edge + 28 + (i % 2) * 12);
+    ctx.lineTo(tx + 8, edge + 36 + (i % 2) * 12);
+    ctx.lineTo(tx + 5, edge + 44 + (i % 2) * 12);
+    ctx.stroke();
+  }
+  path([[x + 20, edge + 13], [x + 27, edge + 8], [x + 36, edge + 12], [x + 31, edge + 17]], palette("moss"));
+}
+
+function drawBridge(obstacle, x, palette) {
+  const edge = obstacle.edge;
+  const w = obstacle.width;
+  rounded(x - 7, 188, w + 14, Math.max(25, edge - 188), 7, palette("bridgeDark"));
+  rounded(x - 2, 194, w + 4, Math.max(22, edge - 194), 5, palette("bridge"));
+  rounded(x + 2, 198, w - 4, 8, 3, palette("bridgeLight"));
+  rounded(x - 5, edge - 23, w + 10, 23, 5, palette("bridgeDark"));
+  rounded(x, edge - 20, w, 14, 3, palette("bridgeLight"));
+  rounded(x, edge - 6, w, 6, 2, palette("bridge"));
+  ctx.strokeStyle = `${palette("bridgeDark")}aa`;
+  ctx.lineWidth = 1.5;
+  for (let y = 222; y < edge - 24; y += 22) {
+    ctx.beginPath();
+    ctx.moveTo(x + 3, y);
+    ctx.lineTo(x + w - 3, y);
+    ctx.stroke();
+    const offset = y % 44 < 22 ? w * .34 : w * .68;
+    ctx.beginPath();
+    ctx.moveTo(x + offset, y);
+    ctx.lineTo(x + offset, Math.min(edge - 24, y + 22));
+    ctx.stroke();
+  }
+  for (const boltX of [x + 12, x + w - 12]) {
+    ctx.fillStyle = palette("bridgeDark");
+    ctx.beginPath();
+    ctx.arc(boltX, edge - 13, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  rounded(x + 8, 210, Math.max(8, w * .12), Math.max(0, edge - 241), 4, palette("bridgeLight"));
+  rounded(x + w * .84, 210, Math.max(8, w * .12), Math.max(0, edge - 241), 4, palette("bridgeLight"));
+  path([[x + 7, 215], [x + 16, 215], [x + 22, 221], [x + 13, 224]], palette("moss"));
+}
+
+function drawBoat(skin) {
+  const y = waterY(game.lift);
+  ctx.save();
+  ctx.translate(RULES.boatX, y);
+  ctx.fillStyle = "#27696235";
+  ctx.beginPath(); ctx.ellipse(0, 18, 38, 6, 0, 0, Math.PI * 2); ctx.fill();
+  path([[-26, -3], [26, -3], [14, 9], [-15, 9]], "#f5ecd4", "#e0d4b8");
+  path([[-22, -4], [-2, -39], [-2, -4]], skin.sail);
+  path([[0, -37], [21, -5], [0, -5]], skin.fold);
+  path([[-26, -3], [0, 3], [26, -3], [14, 9], [-15, 9]], skin.hull);
+  ctx.restore();
+}
+
+function drawCrash(skin) {
+  if (!crashOrigin) return;
+  const progress = Math.min(1, crashTime / crashDuration);
+  const ease = 1 - (1 - progress) ** 3;
+  const lowMotion = reducedMotion;
+  ctx.save();
+  ctx.translate(RULES.boatX, crashOrigin.y - 5);
+  ctx.globalAlpha = Math.max(.65, 1 - progress * .35);
+  ctx.strokeStyle = "#f4fff0";
+  ctx.lineWidth = lowMotion ? 3 : 4;
+  ctx.beginPath();
+  ctx.ellipse(0, 16, 10 + 48 * ease, 3 + 13 * ease, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  for (let i = 0; i < 8; i++) {
+    const angle = -Math.PI + i * Math.PI / 4;
+    const travel = (lowMotion ? 26 : 78) * ease;
+    const x = Math.cos(angle) * travel;
+    const y = Math.sin(angle) * travel - (lowMotion ? 0 : Math.sin(progress * Math.PI) * 24) + ease * (lowMotion ? 4 : 12);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle + progress * (lowMotion ? .2 : 2.8));
+    ctx.lineWidth = 1.5;
+    if (i % 3 === 0) {
+      path([[-5, 5], [-2, -15], [2, 4]], skin.sail, "#4b5c53");
+    } else if (i % 3 === 1) {
+      path([[-11, -3], [10, -3], [3, 5], [-7, 5]], skin.hull, "#4b382d");
+    } else {
+      path([[-6, -5], [6, -3], [4, 5], [-5, 4]], skin.fold, "#5e5546");
+    }
+    ctx.restore();
+  }
+  for (let i = 0; i < 7; i++) {
+    const angle = -Math.PI + i * Math.PI / 6;
+    const radius = 18 + ease * 48;
+    ctx.fillStyle = i % 2 ? "#f4fff0" : "#b9eee1";
+    ctx.beginPath();
+    ctx.arc(Math.cos(angle) * radius, 14 + Math.sin(angle) * (lowMotion ? 10 : 24), lowMotion ? 3 : 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function draw() {
@@ -457,17 +629,9 @@ function draw() {
     const x = obstacle.x - scroll;
     if (x > width + 120 || x < -150) continue;
     if (obstacle.type === "rock") {
-      path([[x - 5, 550], [x + 2, obstacle.edge + 31], [x + 22, obstacle.edge], [x + 43, obstacle.edge + 6], [x + obstacle.width, obstacle.edge + 39], [x + obstacle.width + 10, 550]], "#829284", "#6f8275");
-      path([[x + 22, obstacle.edge], [x + 28, obstacle.edge + 47], [x + obstacle.width, obstacle.edge + 39], [x + 43, obstacle.edge + 6]], "#96a295");
+      drawRock(obstacle, x, palette);
     } else {
-      rounded(x, 194, obstacle.width, obstacle.edge - 194, 5, "#a88363");
-      rounded(x, obstacle.edge - 20, obstacle.width, 20, 3, "#81654f");
-      ctx.strokeStyle = "#bc9a77";
-      ctx.lineWidth = 2;
-      for (let by = 213; by < obstacle.edge - 20; by += 24) {
-        ctx.beginPath(); ctx.moveTo(x, by); ctx.lineTo(x + obstacle.width, by); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(x + (by % 48 ? 25 : 62), by); ctx.lineTo(x + (by % 48 ? 25 : 62), by - 23); ctx.stroke();
-      }
+      drawBridge(obstacle, x, palette);
     }
   }
   const water = ctx.createLinearGradient(0, y, 0, 600);
@@ -530,16 +694,9 @@ function draw() {
     ctx.strokeRect(next.x - scroll - 26, targetTop, 18, 26);
     ctx.setLineDash([]);
   }
-  ctx.save();
-  ctx.translate(RULES.boatX, y);
   const skin = SKINS[progress.data.selected];
-  ctx.fillStyle = "#27696235";
-  ctx.beginPath(); ctx.ellipse(0, 18, 38, 6, 0, 0, Math.PI * 2); ctx.fill();
-  path([[-26, -3], [26, -3], [14, 9], [-15, 9]], "#f5ecd4", "#e0d4b8");
-  path([[-22, -4], [-2, -39], [-2, -4]], skin.sail);
-  path([[0, -37], [21, -5], [0, -5]], skin.fold);
-  path([[-26, -3], [0, 3], [26, -3], [14, 9], [-15, 9]], skin.hull);
-  ctx.restore();
+  if (state === "crashing") drawCrash(skin);
+  else if (!game.failure) drawBoat(skin);
   rounded(20, 240, 6, 235, 3, "#eff7e651");
   rounded(20, y - 4, 6, 8, 3, "#fff5d6");
 }
@@ -549,14 +706,19 @@ function frame(time) {
   lastTime = time;
   if (state === "running") {
     visualTime += dt;
-    game.update(dt, holding());
-    $("flow").textContent = `Flow ${Math.round(game.progression * 100)}% · ${(game.speed / game.difficulty.startSpeed).toFixed(2)}×`;
+    game.update(dt, holding(), boosting());
+    const boostLabel = boosting() ? (game.boostLimited ? " · BOOST · SAFE PACE" : " · BOOST") : "";
+    $("flow").textContent = `Flow ${Math.round(game.progression * 100)}% · ${(game.speed / game.difficulty.startSpeed).toFixed(2)}×${boostLabel}`;
     if (holding() !== wasHolding) {
       if (visualTime - lastTideSound > .25) {
         sound.play(holding() ? "rise" : "fall");
         lastTideSound = visualTime;
       }
       wasHolding = holding();
+    }
+    if (boosting() !== wasBoosting) {
+        if (boosting()) sound.play("boost");
+        wasBoosting = boosting();
     }
     sparkles = sparkles.filter(sparkle => (sparkle.life -= dt) > 0);
     if (game.pickups.length || game.passEvents.length) {
@@ -593,7 +755,12 @@ function frame(time) {
     const next = game.next;
     $("next").textContent = next ? `${next.type === "rock" ? "↑ Hold · rock" : "↓ Release · bridge"}${next.x - game.distance > width ? " ahead" : ""}` : "Find your flow";
     $("tide").classList.toggle("active", holding());
-    if (game.failure) finish();
+    $("boost").classList.toggle("active", boosting());
+    $("boost").setAttribute("aria-pressed", String(boosting()));
+    if (game.failure) beginCrash();
+  } else if (state === "crashing") {
+    crashTime += dt;
+    if (crashTime >= crashDuration) finish();
   }
   if (state !== "running" && state !== "paused" && shownGoalDate !== utcDate()) {
     updateBestPreview();

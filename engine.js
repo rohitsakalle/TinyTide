@@ -1,6 +1,6 @@
 export const RULES = Object.freeze({
   height: 600, boatX: 122, boatHalfWidth: 26, boatHeight: 40, draft: 9,
-  lowWater: 465, travel: 220, tideRate: 0.68,
+  lowWater: 465, travel: 220, tideRate: 0.68, boostFactor: 1.35,
   progressionSeconds: 90,
 });
 export const MODES = Object.freeze({
@@ -10,7 +10,7 @@ export const MODES = Object.freeze({
 });
 
 export function minimumViewWidth(mode) {
-  return Math.max(560, Math.ceil(MODES[mode].maxSpeed * (1 / RULES.tideRate + .5) + RULES.boatX + RULES.boatHalfWidth));
+  return Math.max(560, Math.ceil(MODES[mode].maxSpeed * RULES.boostFactor * (1 / RULES.tideRate + .5) + RULES.boatX + RULES.boatHalfWidth));
 }
 
 export function waterY(lift) {
@@ -38,6 +38,7 @@ export class TideGame {
     this.elapsed = 0;
     this.accumulator = 0;
     this.lift = 0.34;
+    this.baseSpeed = this.difficulty.startSpeed;
     this.speed = this.difficulty.startSpeed;
     this.obstacles = [];
     this.coins = [];
@@ -51,14 +52,15 @@ export class TideGame {
     this.failure = null;
     this.spawnCount = 0;
     this.lastType = "bridge";
+    this.boostLimited = false;
     this.spawn(720);
   }
 
   spawn(x) {
+    const challenge = this.courseProgression;
     const type = this.spawnCount < 2
       ? (this.lastType === "bridge" ? "rock" : "bridge")
-      : (this.random() < .4 - .32 * this.progression ? this.lastType : this.lastType === "rock" ? "bridge" : "rock");
-    const challenge = this.progression;
+      : (this.random() < .4 - .32 * challenge ? this.lastType : this.lastType === "rock" ? "bridge" : "rock");
     const obstacle = {
       type, x, width: type === "rock" ? 62 + 38 * challenge : 94 + 46 * challenge,
       edge: type === "rock" ? 336 + this.random() * 26 - 46 * challenge : 310 + this.random() * 22 + 60 * challenge,
@@ -75,7 +77,7 @@ export class TideGame {
     return obstacle;
   }
 
-  update(dt, holding) {
+  update(dt, holding, boosting = false) {
     if (!Number.isFinite(dt) || dt < 0) throw new RangeError("dt must be finite and non-negative");
     this.pickups = [];
     this.passEvents = [];
@@ -87,7 +89,19 @@ export class TideGame {
       this.accumulator = Math.max(0, this.accumulator - step);
       this.elapsed += step;
       this.lift = Math.max(0, Math.min(1, this.lift + (holding ? 1 : -1) * RULES.tideRate * step));
-      this.speed = this.difficulty.startSpeed + (this.difficulty.maxSpeed - this.difficulty.startSpeed) * this.progression;
+      this.baseSpeed = this.difficulty.startSpeed + (this.difficulty.maxSpeed - this.difficulty.startSpeed) * this.progression;
+      this.speed = this.baseSpeed;
+      this.boostLimited = false;
+      if (boosting) {
+        const boostedSpeed = this.baseSpeed * RULES.boostFactor;
+        const next = this.next;
+        if (next) {
+          const lead = next.x - (this.distance + RULES.boatX + RULES.boatHalfWidth);
+          const safeSpeed = Math.max(this.baseSpeed, lead / (1 / RULES.tideRate + .5));
+          this.speed = Math.min(boostedSpeed, safeSpeed);
+          this.boostLimited = this.speed < boostedSpeed;
+        } else this.speed = boostedSpeed;
+      }
       this.distance += this.speed * step;
       const left = this.distance + RULES.boatX - RULES.boatHalfWidth;
       const right = this.distance + RULES.boatX + RULES.boatHalfWidth;
@@ -134,11 +148,15 @@ export class TideGame {
     const t = Math.min(1, this.elapsed / RULES.progressionSeconds);
     return t * t * (3 - 2 * t);
   }
+  get courseProgression() {
+    const t = Math.min(1, this.spawnCount / 24);
+    return t * t * (3 - 2 * t);
+  }
   get obstacleGap() {
-    // Budget at the mode's future speed, including boat overlap, the first coin,
-    // a full-height transition, and reaction time even at maximum difficulty.
+    // Budget at the maximum boosted speed, including overlap, coin approach,
+    // a full-height transition, and reaction time.
     return 2 * RULES.boatHalfWidth + 90
-      + this.difficulty.maxSpeed * (1 / RULES.tideRate + .25 + .7 * (1 - this.progression));
+      + this.difficulty.maxSpeed * RULES.boostFactor * (1 / RULES.tideRate + .25 + .7 * (1 - this.courseProgression));
   }
   get next() { return this.obstacles.find(o => !o.passed); }
 }

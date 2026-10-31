@@ -46,6 +46,8 @@ export class TideSound {
       coin: [[988, 0, .1], [1319, .07, .18]],
       rise: [[392, 0, .12], [523, .06, .16]],
       fall: [[523, 0, .1], [392, .06, .16]],
+      boost: [[392, 0, .07], [587, .05, .09]],
+      crash: [[392, 0, .09], [220, .05, .14], [110, .12, .24]],
       finish: [[392, 0, .17], [330, .13, .17], [262, .26, .28]],
       perfect: [[659, 0, .12], [880, .07, .14], [1319, .14, .2]],
     }[name];
@@ -54,7 +56,7 @@ export class TideSound {
       const oscillator = this.context.createOscillator();
       const gain = this.context.createGain();
       const at = this.context.currentTime + delay;
-      oscillator.type = "sine";
+      oscillator.type = name === "crash" ? "triangle" : "sine";
       oscillator.frequency.setValueAtTime(frequency, at);
       gain.gain.setValueAtTime(0, at);
       gain.gain.linearRampToValueAtTime(.065, at + .012);

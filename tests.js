@@ -3,6 +3,8 @@ import { TideSound } from "./sound.js";
 import { ProgressStore, PROGRESS_KEY, SKINS, MISSIONS, MASTERY, utcDate, dailyRandom, dailyMissions, bestComparison } from "./progress.js";
 import { DAILY_RULES, GAME_URL, dailyResultText, shareDaily, copyDaily } from "./sharing.js";
 
+const scoreKey = mode => `tiny-tide-best-${DAILY_RULES}-${mode}`;
+
 function assert(condition, message = "Assertion failed") {
   if (!condition) throw new Error(message);
 }
@@ -66,6 +68,19 @@ export function runTests() {
       assert(Math.abs(game.lift - games[0].lift) < 1e-9);
     }
   });
+  test("Forward boost is meaningful, leaves tide control independent and protects nearby transitions", () => {
+    const normal = new TideGame(seeded(42), "medium");
+    const boosted = new TideGame(seeded(42), "medium");
+    normal.update(1 / 120, false);
+    boosted.update(1 / 120, false, true);
+    assert(Math.abs(boosted.speed / normal.speed - RULES.boostFactor) < .001);
+    assert(normal.lift === boosted.lift, "Boost changed water height");
+    const close = new TideGame(seeded(42), "medium");
+    close.obstacles = [{ type: "rock", x: RULES.boatX + RULES.boatHalfWidth + 80, width: 60, edge: 340, passed: false }];
+    close.update(1 / 120, false, true);
+    assert(close.speed === close.baseSpeed && close.boostLimited, "Boost outran the full-transition warning");
+    assert(minimumViewWidth("fast") - RULES.boatX - RULES.boatHalfWidth >= MODES.fast.maxSpeed * RULES.boostFactor * (1 / RULES.tideRate + .5) - 1e-9);
+  });
   test("Invalid time rejected, long stalls capped", () => {
     const game = new TideGame();
     for (const dt of [-1, NaN, Infinity]) {
@@ -79,7 +94,7 @@ export function runTests() {
   test("Smallest viewport gives a full transition plus 0.5s warning", () => {
     for (const mode of Object.keys(MODES)) {
       const lead = minimumViewWidth(mode) - RULES.boatX - RULES.boatHalfWidth;
-      assert(lead / MODES[mode].maxSpeed >= 1 / RULES.tideRate + .5);
+      assert(lead / (MODES[mode].maxSpeed * RULES.boostFactor) >= 1 / RULES.tideRate + .5);
     }
   });
   test("All modes ramp smoothly to a bounded cap over 90 active seconds and reset", () => {
@@ -109,10 +124,11 @@ export function runTests() {
     for (const mode of Object.keys(MODES)) {
       const opening = new TideGame(() => .2, mode);
       const late = new TideGame(() => .2, mode);
-      late.elapsed = RULES.progressionSeconds;
+      late.spawnCount = 24;
       assert(late.obstacleGap < opening.obstacleGap);
       for (const type of ["rock", "bridge"]) {
-        opening.spawnCount = late.spawnCount = 0;
+        opening.spawnCount = 2;
+        late.spawnCount = 24;
         opening.lastType = late.lastType = type === "rock" ? "bridge" : "rock";
         const earlyObstacle = opening.spawn(3000);
         const lateObstacle = late.spawn(3000);
@@ -121,10 +137,11 @@ export function runTests() {
         const safeSurface = waterY(type === "rock" ? 1 : 0);
         assert(type === "rock" ? safeSurface + RULES.draft < lateObstacle.edge : safeSurface - RULES.boatHeight > lateObstacle.edge);
       }
-      opening.spawnCount = late.spawnCount = 2;
+      opening.spawnCount = 2;
+      late.spawnCount = 24;
       opening.lastType = late.lastType = "rock";
       assert(opening.spawn(4000).type === "rock" && late.spawn(4000).type === "bridge");
-      const transitionBudget = (late.obstacleGap - 2 * RULES.boatHalfWidth - 90) / MODES[mode].maxSpeed;
+      const transitionBudget = (late.obstacleGap - 2 * RULES.boatHalfWidth - 90) / (MODES[mode].maxSpeed * RULES.boostFactor);
       assert(transitionBudget >= 1 / RULES.tideRate + .25);
     }
   });
@@ -171,6 +188,30 @@ export function runTests() {
     const second = new TideGame(dailyRandom("2026-10-28"));
     assert(first.obstacles[0].edge !== second.obstacles[0].edge, "Next UTC day did not change course");
   });
+  test("Daily obstacle and coin layouts stay identical when boost timing changes", () => {
+    function generatedCourse(boost) {
+      const game = new TideGame(dailyRandom("2026-10-27"), "medium");
+      const course = [{ ...game.obstacles[0], coins: game.coins.map(({ x, y }) => [x, y]) }];
+      const spawn = game.spawn.bind(game);
+      game.spawn = x => {
+        const obstacle = spawn(x);
+        course.push({ ...obstacle, coins: game.coins.slice(-3).map(({ x: coinX, y }) => [coinX, y]) });
+        return obstacle;
+      };
+      for (let frame = 0; frame < 60 * 100 && !game.failure; frame++) {
+        game.update(1 / 60, game.next?.type === "rock", boost(frame));
+      }
+      assert(!game.failure, "Boosted daily route became unavoidable");
+      return course;
+    }
+    const steady = generatedCourse(() => false);
+    const toggled = generatedCourse(frame => frame % 180 < 120);
+    const shared = Math.min(steady.length, toggled.length);
+    assert(shared > 15, "Not enough generated course to compare");
+    for (let i = 0; i < shared; i++) {
+      assert(JSON.stringify(steady[i]) === JSON.stringify(toggled[i]), `Boost changed seeded obstacle ${i}`);
+    }
+  });
   test("Scenery transitions are continuous, bounded and do not alter game state", () => {
     assert(sceneryState(0).from === 0 && sceneryState(60).from === 1 && sceneryState(95).from === 2);
     const game = new TideGame();
@@ -215,13 +256,28 @@ export function runTests() {
     const values = new Map([[PROGRESS_KEY, JSON.stringify(legacy)]]);
     const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
     const store = new ProgressStore(storage);
-    assert(store.data.version === 2 && store.data.coins === 123 && store.data.selected === "mint");
-    assert(store.data.owned.includes("mint") && store.data.completed.includes("passes5") && store.data.dailyBests["2026-10-27"] === 45);
+    assert(store.data.version === 3 && store.data.coins === 123 && store.data.selected === "mint");
+    assert(store.data.owned.includes("mint") && store.data.completed.includes("passes5") && store.data.dailyBests["2026-10-27"] === undefined);
+    assert(store.data.legacyDailyBests["2026-10-27"] === 45, "Old daily record was not archived");
     assert(Object.values(store.data.totals).every(total => total === 0));
     assert(values.get(PROGRESS_KEY) === JSON.stringify(legacy), "Read-only migration changed stored data");
     store.beginRun("2026-10-28", "v1-upgrade");
-    assert(JSON.parse(values.get(PROGRESS_KEY)).version === 2);
+    assert(JSON.parse(values.get(PROGRESS_KEY)).version === 3);
     assert(new ProgressStore(storage).data.coins === 123);
+  });
+  test("V2 saves keep prior-rule daily bests separate from new boosted rules", () => {
+    const previous = {
+      version: 2, coins: 40, owned: ["paper"], selected: "paper", completed: [],
+      dailyBests: { "2026-10-30": 120 }, totals: { collected: 4, passed: 2, perfects: 1 },
+      dailyGoals: {}, runs: {},
+    };
+    const values = new Map([[PROGRESS_KEY, JSON.stringify(previous)]]);
+    const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+    const store = new ProgressStore(storage);
+    assert(store.data.dailyBests["2026-10-30"] === undefined);
+    assert(store.data.legacyDailyBests["2026-10-30"] === 120);
+    store.recordDaily("2026-10-30", 80);
+    assert(store.data.dailyBests["2026-10-30"] === 80 && store.data.legacyDailyBests["2026-10-30"] === 120);
   });
   test("Rotating daily missions aggregate short runs and pay once even after reload/clock rollback", () => {
     const values = new Map();
@@ -363,7 +419,7 @@ export function runTests() {
         }
         for (let frame = 0; frame < 60 * 100; frame++) {
           const coins = game.coins.slice();
-          game.update(1 / 60, game.next?.type === "rock");
+          game.update(1 / 60, game.next?.type === "rock", true);
           assert(game.failure === null, `${mode}, seed ${seed}, frame ${frame}`);
           assert(coins.every(coin => coin.collected || coin.x > game.distance - 50), `${mode}: missed a safe-path coin`);
         }
@@ -395,7 +451,7 @@ export function runTests() {
           }
           previous = obstacle;
         }
-        game.update(1 / 60, obstacle?.type === "rock");
+        game.update(1 / 60, obstacle?.type === "rock", seed % 2 === 0);
         assert(game.failure === null, `seed ${seed}, frame ${frame}, obstacle ${obstacle?.type}`);
       }
       assert(game.passed >= 15, `Too few obstacles, seed ${seed}`);
@@ -415,6 +471,8 @@ export async function runBrowserTests() {
     <script>
       window.testFrame = null;
       window.testTime = performance.now();
+      window.testReducedMotion = window.parent.testReducedMotion === true;
+      window.matchMedia = query => ({ matches: query === "(prefers-reduced-motion: reduce)" && window.testReducedMotion });
       window.requestAnimationFrame = callback => { window.testFrame = callback; return 1; };
       window.testErrors = [];
       window.addEventListener("error", event => window.testErrors.push(event.message));
@@ -445,7 +503,7 @@ export async function runBrowserTests() {
     iframe.onload = resolve;
     iframe.onerror = () => reject(new Error("Integration frame failed to load"));
   });
-  const storageKeys = ["tiny-tide-best", "tiny-tide-best-easy", "tiny-tide-best-medium", "tiny-tide-best-fast", "tiny-tide-coins", "tiny-tide-muted", PROGRESS_KEY];
+  const storageKeys = ["tiny-tide-best", "tiny-tide-best-easy", "tiny-tide-best-medium", "tiny-tide-best-fast", ...["easy", "medium", "fast"].map(scoreKey), "tiny-tide-coins", "tiny-tide-muted", PROGRESS_KEY];
   const originals = new Map(storageKeys.map(key => [key, localStorage.getItem(key)]));
   for (const key of storageKeys) localStorage.removeItem(key);
   localStorage.setItem("tiny-tide-best", "37");
@@ -467,6 +525,11 @@ export async function runBrowserTests() {
     function key(type, code) {
       el("game").dispatchEvent(new win.KeyboardEvent(type, { code, bubbles: true }));
     }
+    function failRun(type = "rock") {
+      win.testGame.failure = type;
+      frames(1);
+      frames(100);
+    }
     function waterLine() {
       const canvas = el("game");
       const context = canvas.getContext("2d");
@@ -479,11 +542,12 @@ export async function runBrowserTests() {
     }
     async function test(name, fn) {
       try { await fn(); passed++; results.push(`PASS ${name}`); }
-      catch (error) { results.push(`FAIL ${name}: ${error.message}`); }
+      catch (error) { results.push(`FAIL ${name}: ${error.message} (${error.stack?.split("\n")[2]?.trim() || "no stack"})`); }
     }
     await wait();
-    await test("Legacy best maps to Medium, bank loads and no audio starts before gesture", () => {
-      assert(el("best").textContent === "37 pts");
+    await test("Prior-rule best is preserved separately, bank loads and no audio starts before gesture", () => {
+      assert(el("best").textContent === "0 pts" && el("previous-best").textContent.includes("37 pts"));
+      assert(localStorage.getItem("tiny-tide-best") === "37");
       assert(el("coin-bank").textContent === "10");
       assert(win.audioStats.created === 0 && win.audioStats.notes === 0);
     });
@@ -495,7 +559,9 @@ export async function runBrowserTests() {
         assert(doc.documentElement.scrollWidth <= width, `Overflow at ${width}px`);
         assert(el("game").width > 0 && el("game").height > 0);
         assert(el("play").getBoundingClientRect().height >= 44);
-        assert(el("tide").getBoundingClientRect().height >= 40);
+        assert(el("tide").getBoundingClientRect().height >= 44 && el("boost").getBoundingClientRect().height >= 44);
+        assert(el("boost").getBoundingClientRect().left >= el("tide").getBoundingClientRect().left);
+        assert(el("boost").getBoundingClientRect().right <= width, `Boost button overflow at ${width}px`);
       }
       iframe.style.width = "390px";
       await wait();
@@ -515,6 +581,13 @@ export async function runBrowserTests() {
       frames(1);
       assert(el("tide").classList.contains("active"), "Focused tide button did not accept Space");
       key("keyup", "Space");
+      const base = win.testGame.baseSpeed;
+      key("keydown", "ArrowRight");
+      frames(2);
+      assert(win.testGame.speed > base && el("flow").textContent.includes("BOOST"));
+      key("keyup", "ArrowRight");
+      frames(1);
+      assert(win.testGame.speed === win.testGame.baseSpeed && !el("boost").classList.contains("active"));
     });
     await test("Pause freezes score, resume clears held keys, blur pauses", () => {
       key("keydown", "ArrowUp");
@@ -527,37 +600,67 @@ export async function runBrowserTests() {
       assert(el("flow").textContent === flow && el("scenery").textContent === scenery, "Pause advanced difficulty or scenery");
       el("play").click();
       frames(20);
-      assert(!el("tide").classList.contains("active"), "Resume left input stuck");
+      assert(!el("tide").classList.contains("active") && !el("boost").classList.contains("active"), "Resume left input stuck");
       win.dispatchEvent(new win.Event("blur"));
       assert(!el("overlay").hidden && el("overlay-title").textContent === "A moment of calm.");
     });
-    await test("Touch-pointer intent, multi-touch and cancellation clear correctly", () => {
+    await test("Touch-pointer intent, simultaneous tide/boost multi-touch and cancellation clear correctly", () => {
       el("play").click();
       // Synthetic pointer events cannot create native capture; exercise input state in isolation.
       el("tide").setPointerCapture = () => {};
+      el("boost").setPointerCapture = () => {};
       function pointer(type, id) {
-        el("tide").dispatchEvent(new win.PointerEvent(type, { pointerId: id, pointerType: "touch", button: 0, bubbles: true }));
+        const target = id === 10 ? el("tide") : el("boost");
+        target.dispatchEvent(new win.PointerEvent(type, { pointerId: id, pointerType: "touch", button: 0, bubbles: true }));
       }
       pointer("pointerdown", 10);
       pointer("pointerdown", 11);
       frames(1);
-      assert(el("tide").classList.contains("active"));
+      assert(el("tide").classList.contains("active") && el("boost").classList.contains("active"));
       pointer("pointercancel", 10);
       frames(1);
-      assert(el("tide").classList.contains("active"), "Second finger was incorrectly cleared");
+      assert(!el("tide").classList.contains("active") && el("boost").classList.contains("active"), "Cancelling tide cleared boost or kept water raised");
       pointer("lostpointercapture", 11);
       frames(1);
-      assert(!el("tide").classList.contains("active"), "Cancelled touch remained held");
+      assert(!el("boost").classList.contains("active") && el("boost").getAttribute("aria-pressed") === "false", "Cancelled boost remained held");
     });
-    await test("Collision feedback, saved best and immediate retry", () => {
-      frames(250);
+    await test("Crash animation freezes play before results, settles once, then allows retry", () => {
+      for (let frame = 0; frame < 500 && el("impact").hidden; frame++) frames(1);
+      assert(!el("impact").hidden && el("overlay").hidden && el("run-result").hidden, "Results appeared before crash animation");
+      const frozenScore = el("score").textContent;
+      const bank = el("coin-bank").textContent;
+      assert(el("tide").disabled && el("boost").disabled);
+      key("keydown", "ArrowRight");
+      frames(8);
+      assert(el("score").textContent === frozenScore && !el("boost").classList.contains("active"), "Crash accepted input or changed score");
+      frames(40);
+      const crashCanvas = el("game");
+      const crashPixels = crashCanvas.getContext("2d").getImageData(0, 0, crashCanvas.width, crashCanvas.height).data;
+      let visibleFragments = 0;
+      for (let i = 0; i < crashPixels.length; i += 4) {
+        if (crashPixels[i] > 190 && crashPixels[i + 1] > 105 && crashPixels[i + 1] < 215 && crashPixels[i + 2] < 175) visibleFragments++;
+      }
+      assert(visibleFragments > 30, `Crash burst was not visibly drawn (${visibleFragments} colored fragment pixels)`);
+      assert(el("run-result").hidden, "Crash results appeared during the burst");
+      frames(50);
       assert(!el("overlay").hidden && el("overlay-copy").textContent.includes("Hold earlier"));
-      assert(Number(localStorage.getItem("tiny-tide-best")) > 0);
+      assert(!el("run-result").hidden && Number(localStorage.getItem(scoreKey("medium"))) > 0);
+      assert(el("coin-bank").textContent === bank, "Crash completion paid coins twice");
+      frames(120);
+      assert(el("coin-bank").textContent === bank, "Repeated result frames paid rewards twice");
       key("keydown", "Space");
       frames(1);
       assert(el("overlay").hidden && Number(el("score").textContent) === 0);
       assert(el("flow").textContent === "Flow 0% · 1.00×");
       key("keyup", "Space");
+      key("keydown", "ArrowRight");
+      assert(el("overlay").hidden, "Boost key incorrectly restarted a run");
+      key("keyup", "ArrowRight");
+      win.testGame.failure = "bridge";
+      frames(1);
+      assert(!el("impact").hidden && el("run-result").hidden);
+      win.dispatchEvent(new win.Event("blur"));
+      assert(el("impact").hidden && !el("run-result").hidden, "Leaving mid-crash left the game stuck");
       assert(win.testErrors.length === 0, win.testErrors.join("; "));
     });
     await test("Collect coins, persist immediately and keep balance across reload", async () => {
@@ -609,7 +712,8 @@ export async function runBrowserTests() {
         el("mode").dispatchEvent(new win.Event("change"));
         el("mode").dispatchEvent(new win.KeyboardEvent("keydown", { code: "ArrowUp", bubbles: true }));
         assert(!el("mode").disabled, "Selecting pace started the game");
-        assert(el("best").textContent === (mode === "medium" ? `${localStorage.getItem("tiny-tide-best-medium") || 37} pts` : "0 pts"));
+        const expectedBest = Number(localStorage.getItem(scoreKey(mode)) || 0);
+        assert(el("best").textContent === `${expectedBest} pts`, `${mode} best preview: ${el("best").textContent}`);
         el("play").click();
         assert(el("mode").disabled);
         el("mode").value = "fast";
@@ -620,17 +724,17 @@ export async function runBrowserTests() {
         el("play").click();
         frames(500);
         assert(!el("mode").disabled && !el("overlay").hidden);
-        const saved = Number(localStorage.getItem(`tiny-tide-best-${mode}`));
+        const saved = Number(localStorage.getItem(scoreKey(mode)));
         assert(saved > 0 && el("best").textContent === `${saved} pts`);
       }
-      assert(Number(localStorage.getItem("tiny-tide-best")) === Number(localStorage.getItem("tiny-tide-best-medium")));
+      assert(localStorage.getItem("tiny-tide-best") === "37");
       assert(win.testErrors.length === 0, win.testErrors.join("; "));
     });
     await test("Daily course uses fixed Medium, locks choices, saves only today's separate best", () => {
       el("course").value = "daily";
       el("course").dispatchEvent(new win.Event("change"));
       assert(el("mode").disabled && el("daily-date").textContent.includes(`${utcDate()} UTC`));
-      const endlessBest = localStorage.getItem("tiny-tide-best-medium");
+      const endlessBest = localStorage.getItem(scoreKey("medium"));
       el("play").click();
       frames(1);
       assert(win.testGame.mode === "medium" && el("course").disabled);
@@ -641,7 +745,7 @@ export async function runBrowserTests() {
       frames(500);
       const data = JSON.parse(localStorage.getItem(PROGRESS_KEY));
       assert(data.dailyBests[utcDate()] > 0 && !el("course").disabled && el("mode").disabled);
-      assert(localStorage.getItem("tiny-tide-best-medium") === endlessBest, "Daily modified endless best");
+      assert(localStorage.getItem(scoreKey("medium")) === endlessBest, "Daily modified endless best");
       assert(el("daily-date").textContent === dateLabel);
     });
     await test("Long daily run pays missions once, shows progress, pauses scenery and resets on retry", () => {
@@ -678,7 +782,7 @@ export async function runBrowserTests() {
       assert(el("course").disabled && el("mode").disabled);
       el("play").click();
       run.failure = "rock";
-      frames(1);
+      frames(1); frames(100);
       const previousBank = Number(el("coin-bank").textContent);
       el("play").click();
       frames(1);
@@ -686,7 +790,7 @@ export async function runBrowserTests() {
       safeFrames(2100);
       assert(Number(el("coin-bank").textContent) === previousBank + win.testGame.collected, "Mission paid again on retry");
       win.testGame.failure = "rock";
-      frames(1);
+      frames(1); frames(100);
     });
     await test("Daily retries repeat the course and a UTC-midnight run keeps its starting date", async () => {
       const OriginalDate = win.Date;
@@ -700,30 +804,30 @@ export async function runBrowserTests() {
         el("play").click(); frames(1);
         const opening = JSON.stringify({ obstacles: win.testGame.obstacles, coins: win.testGame.coins });
         key("keydown", "Space"); frames(270); key("keyup", "Space");
-        assert(JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyGoals["2030-01-01"].collected === 3);
+        assert(JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyGoals["2030-01-01"].collected === 3, `Initial frozen mission: ${JSON.stringify(JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyGoals)}`);
         now = "2030-01-02T00:00:01.000Z";
         const game = win.testGame;
         game.coins.push({ x: game.distance + RULES.boatX, y: waterY(game.lift) - 18 });
         frames(1);
-        assert(JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyGoals["2030-01-01"].collected === 4);
-        assert(!JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyGoals["2030-01-02"]);
-        assert(el("daily-missions-date").textContent.includes("2030-01-01"));
-        win.testGame.failure = "rock"; frames(1);
+        assert(JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyGoals["2030-01-01"].collected === 4, `Frozen daily coins: ${JSON.stringify(JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyGoals)}`);
+        assert(!JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyGoals["2030-01-02"], `New-day mission was updated: ${JSON.stringify(JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyGoals)}`);
+        assert(el("daily-missions-date").textContent.includes("2030-01-01"), `Run mission date was not frozen: ${el("daily-missions-date").textContent}`);
+        failRun();
         const saved = JSON.parse(localStorage.getItem(PROGRESS_KEY));
         assert(saved.dailyBests["2030-01-01"] > 0 && !saved.dailyBests["2030-01-02"]);
-        assert(el("daily-date").textContent.includes("2030-01-01 UTC"));
-        assert(el("daily-missions-date").textContent.includes("2030-01-02"));
-        assert(el("result-goal").textContent.includes("2030-01-01"));
+        assert(el("daily-date").textContent.includes("2030-01-02 UTC"), `Current Daily challenge label: ${el("daily-date").textContent}`);
+        assert(el("daily-missions-date").textContent.includes("2030-01-02"), `Idle mission date did not roll: ${el("daily-missions-date").textContent}`);
+        assert(el("result-goal").textContent.includes("2030-01-01"), `Result goal date: ${el("result-goal").textContent}`);
         el("copy-result").click(); await wait();
         assert(el("share-text").value.includes("2030-01-01 UTC") && !el("share-text").value.includes("2030-01-02"), "Shared result changed date after midnight");
         now = "2030-01-01T23:59:59.000Z";
         el("play").click(); frames(1);
         assert(JSON.stringify({ obstacles: win.testGame.obstacles, coins: win.testGame.coins }) === opening, "Daily retry rerolled the opening");
-        win.testGame.failure = "rock"; frames(1);
+        failRun();
         now = "2030-01-02T00:00:01.000Z";
         el("play").click(); frames(1);
         assert(el("daily-date").textContent.includes("2030-01-02 UTC"));
-        frames(60); win.testGame.failure = "rock"; frames(1);
+        frames(60); failRun();
         assert(JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyBests["2030-01-02"] > 0);
       } finally {
         win.Date = OriginalDate;
@@ -744,10 +848,13 @@ export async function runBrowserTests() {
       const paper = doc.querySelector('[data-skin="paper"]');
       paper.click(); mint.click();
       assert(Number(el("coin-bank").textContent) === bank - 25, "Reselection charged again");
+      win.testGame.failure = null;
+      win.testGame.lift = .34;
+      frames(1);
       const rect = el("game").getBoundingClientRect();
       const worldWidth = Math.max(minimumViewWidth(win.testGame.mode), Math.min(1100, rect.width / rect.height * RULES.height));
       const hull = el("game").getContext("2d").getImageData(Math.floor(RULES.boatX / worldWidth * el("game").width), Math.floor((waterY(win.testGame.lift) + 6) / RULES.height * el("game").height), 1, 1).data;
-      assert(Math.abs(hull[0] - 119) < 3 && Math.abs(hull[1] - 205) < 3 && Math.abs(hull[2] - 179) < 3, "Selected skin was not rendered on boat");
+      assert(Math.abs(hull[0] - 119) < 3 && Math.abs(hull[1] - 205) < 3 && Math.abs(hull[2] - 179) < 3, `Selected skin was not rendered on boat: ${Array.from(hull).join(",")}`);
       doc.querySelector("#studio summary").dispatchEvent(new win.KeyboardEvent("keydown", { code: "Space", bubbles: true }));
       assert(!el("mode").disabled || el("course").value === "daily");
       assert(!el("course").disabled, "Studio keyboard interaction started gameplay");
@@ -757,7 +864,7 @@ export async function runBrowserTests() {
       const saved = JSON.parse(localStorage.getItem(PROGRESS_KEY));
       assert(saved.selected === "mint" && saved.owned.includes("mint"));
       win.testGame.failure = "rock";
-      frames(1);
+      frames(1); frames(100);
       const reload = new Promise(resolve => iframe.onload = resolve);
       iframe.srcdoc = source.replace("<head>", `<head>${scheduler}`);
       await reload;
@@ -781,7 +888,7 @@ export async function runBrowserTests() {
       const bank = data.coins;
       frames(10);
       assert(Number(el("coin-bank").textContent) === bank, "Repeated counters paid again");
-      win.testGame.failure = "rock"; frames(1);
+      failRun();
       const pearl = doc.querySelector('[data-skin="pearl"]');
       assert(!pearl.disabled && pearl.textContent === "Select");
       pearl.click();
@@ -807,7 +914,7 @@ export async function runBrowserTests() {
       key("keydown", "Space"); frames(2); key("keyup", "Space");
       assert(el("combo").textContent.includes("Perfect!") && el("combo").textContent.includes("+5 points"));
       assert(game.bonus === 5 && Number(el("score").textContent) === game.score);
-      game.failure = "rock"; frames(1);
+      failRun();
       assert(win.testErrors.length === 0, win.testErrors.join("; "));
     });
     await test("Results compare with pre-run best, show actual goals and allow immediate retry", () => {
@@ -815,13 +922,13 @@ export async function runBrowserTests() {
       el("mode").value = "medium"; el("mode").dispatchEvent(new win.Event("change"));
       const previous = Number(el("best").textContent.split(" ")[0]);
       el("play").click(); frames(1);
-      win.testGame.failure = "rock"; frames(1);
+      failRun();
       assert(!el("run-result").hidden && el("result-comparison").textContent.includes(bestComparison(0, previous)));
       assert(!el("overlay-kicker").textContent.includes("NEW"));
       assert((el("result-goal").textContent.includes("/") || el("result-goal").textContent.includes("all mastery complete")) && el("share-options").hidden);
       el("play").click(); frames(1);
       assert(el("run-result").hidden);
-      win.testGame.failure = "rock"; frames(1);
+      failRun();
       el("course").value = "daily"; el("course").dispatchEvent(new win.Event("change"));
     });
     await test("Optional Daily sharing freezes run stats and handles cancel/unsupported/error/copy explicitly", async () => {
@@ -833,7 +940,7 @@ export async function runBrowserTests() {
         set("clipboard", undefined);
         el("play").click(); frames(60);
         const score = win.testGame.score;
-        win.testGame.failure = "rock"; frames(1);
+        failRun();
         assert(!el("share-options").hidden);
         el("share-options").open = true;
         el("share-result").click(); await wait();
@@ -905,12 +1012,32 @@ export async function runBrowserTests() {
         });
         const sound = new TideSound({ createContext: () => proxy });
         await sound.unlock();
-        for (const name of ["start", "coin", "rise", "fall", "finish", "perfect"]) sound.play(name);
+        for (const name of ["start", "coin", "rise", "fall", "boost", "crash", "finish", "perfect"]) sound.play(name);
         if (muted) sound.setMuted(true);
         const rendered = await context.startRendering();
         const peak = rendered.getChannelData(0).reduce((max, value) => Math.max(max, Math.abs(value)), 0);
         assert(muted ? peak === 0 : peak > .01 && peak < 1, `Unexpected ${muted ? "muted" : "audible"} peak ${peak}`);
       }
+    });
+    await test("Reduced-motion crash resolves quickly and muted crash stays silent", async () => {
+      win.parent.testReducedMotion = true;
+      const reload = new Promise(resolve => iframe.onload = resolve);
+      iframe.srcdoc = source.replace("<head>", `<head>${scheduler}`);
+      await reload;
+      win = iframe.contentWindow;
+      doc = iframe.contentDocument;
+      await wait();
+      el("play").click();
+      frames(1);
+      win.testGame.failure = "rock";
+      frames(1);
+      assert(!el("impact").hidden && el("run-result").hidden);
+      frames(10);
+      assert(el("run-result").hidden, "Reduced-motion crash resolved before its brief transition");
+      frames(12);
+      assert(el("impact").hidden && !el("run-result").hidden, "Reduced-motion crash did not finish promptly");
+      assert(win.audioStats.notes === 0, "Muted crash played audio");
+      win.parent.testReducedMotion = false;
     });
   } finally {
     iframe.remove();
