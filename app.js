@@ -1,4 +1,4 @@
-import { TideGame, RULES, MODES, minimumViewWidth, waterY, sceneryState } from "./engine.js";
+import { TideGame, RULES, MODES, GIFTS, minimumViewWidth, waterY, sceneryState } from "./engine.js";
 import { TideSound } from "./sound.js";
 import { ProgressStore, SKINS, MISSIONS, MASTERY, utcDate, dailyRandom, dailyMissions, bestComparison } from "./progress.js";
 import { DAILY_RULES, dailyResultText, shareDaily, copyDaily } from "./sharing.js";
@@ -14,8 +14,8 @@ const startedControlled = Boolean(navigator.serviceWorker?.controller);
 function applyUpdateWhenSafe() {
   if (!updateReady || ["running", "paused", "crashing"].includes(state)) return;
   try {
-    if (sessionStorage.getItem("tiny-tide-reloaded-build") === "T10") return;
-    sessionStorage.setItem("tiny-tide-reloaded-build", "T10");
+    if (sessionStorage.getItem("tiny-tide-reloaded-build") === "T11") return;
+    sessionStorage.setItem("tiny-tide-reloaded-build", "T11");
   } catch (error) {
     console.warn("Tiny Tide could not guard an automatic update reload:", error);
     $("update-game").hidden = false;
@@ -66,7 +66,7 @@ try {
     const stored = localStorage.getItem(bestKey(mode));
     const value = Number(stored);
     bests[mode] = stored !== null && Number.isSafeInteger(value) && value >= 0 ? value : 0;
-    const old = Number(localStorage.getItem(`tiny-tide-best-tide-boost-2-${mode}`) || localStorage.getItem(`tiny-tide-best-${mode}`) || (mode === "medium" ? localStorage.getItem("tiny-tide-best") : 0));
+    const old = Number(localStorage.getItem(`tiny-tide-best-tide-boost-3-${mode}`) || localStorage.getItem(`tiny-tide-best-tide-boost-2-${mode}`) || localStorage.getItem(`tiny-tide-best-${mode}`) || (mode === "medium" ? localStorage.getItem("tiny-tide-best") : 0));
     previousBests[mode] = Number.isSafeInteger(old) && old > 0 ? old : 0;
   }
   best = bests.medium;
@@ -113,7 +113,7 @@ function updateBestPreview() {
   const daily = $("course").value === "daily";
   best = daily ? progress.data.dailyBests[utcDate()] || 0 : bests[$("mode").value];
   $("best").textContent = `${best} pts`;
-  const legacyDaily = progress.data.archivedBoostDailyBests[utcDate()] || progress.data.legacyDailyBests[utcDate()];
+  const legacyDaily = progress.data.archivedT10DailyBests[utcDate()] || progress.data.archivedBoostDailyBests[utcDate()] || progress.data.legacyDailyBests[utcDate()];
   const previous = daily ? legacyDaily : previousBests[$("mode").value];
   $("previous-best").hidden = !previous;
   $("previous-best").textContent = previous ? `Previous rules: ${previous} pts · archived, not compared` : "";
@@ -357,7 +357,7 @@ function finish() {
   }
   const reason = game.failure === "rock" ? "A little too low. Hold earlier to clear the rocks." : "A little too high. Release earlier for the bridge.";
   showOverlay(record && runBest > 0 ? `A NEW ${runDate ? "DAILY" : MODES[game.mode].label.toUpperCase()} BEST` : "EVERY TIDE TEACHES YOU", `${game.score} flow points.`, reason, "Float again →", `${Math.floor(game.distance / 10)} m · ${game.bonus} bonus points · ${game.collected} coins · Space to retry`);
-  lastResult = Object.freeze({ date: runDate, score: game.score, distance: Math.floor(game.distance / 10), bonus: game.bonus, coins: game.collected, passed: game.passed, perfects: game.perfects });
+  lastResult = Object.freeze({ date: runDate, score: game.score, distance: Math.floor(game.distance / 10), bonus: game.bonus, coins: game.collected, giftCoins: game.giftCoins, passed: game.passed, perfects: game.perfects });
   $("result-comparison").textContent = `${runDate ? `${runDate} UTC Daily · ${DAILY_RULES}` : `${MODES[game.mode].label} Endless`}: ${bestComparison(game.score, runBest)}`;
   $("result-goal").textContent = nextGoalText(goalDate);
   $("run-result").hidden = false;
@@ -712,6 +712,17 @@ function draw() {
     ctx.fillStyle = "#a87322"; ctx.font = "bold 14px system-ui"; ctx.textAlign = "center";
     ctx.fillText("·", x, coin.y + 4);
   }
+  for (const gift of game.gifts) {
+    const x = gift.x - scroll;
+    if (x < -25 || x > width + 25) continue;
+    rounded(x - 17, gift.y - 17, 34, 34, 5, "#b095dc");
+    ctx.strokeStyle = "#49325d"; ctx.lineWidth = 3;
+    ctx.strokeRect(x - 17, gift.y - 17, 34, 34);
+    rounded(x - 3, gift.y - 17, 6, 34, 1, "#fff2a9");
+    rounded(x - 17, gift.y - 3, 34, 6, 1, "#fff2a9");
+    ctx.fillStyle = "#49325d"; ctx.font = "bold 18px system-ui"; ctx.textAlign = "center";
+    ctx.fillText("?", x, gift.y - 20);
+  }
   for (const sparkle of sparkles) {
     const progress = 1 - sparkle.life / .7;
     ctx.globalAlpha = 1 - progress;
@@ -741,16 +752,23 @@ function draw() {
   const skin = SKINS[progress.data.selected];
   if (state === "crashing") drawCrash(skin);
   else if (!game.failure) drawBoat(skin);
-  if (state === "running" && game.boostAmount > .1) {
-    ctx.strokeStyle = "#fff2a9";
-    ctx.lineWidth = 3;
+  if (state === "running" && game.boostAmount > .01 && game.speed > game.baseSpeed) {
+    ctx.save();
+    ctx.globalAlpha = game.boostAmount;
+    const length = 30 + game.boostAmount * (reducedMotion ? 25 : 55);
+    const flicker = reducedMotion ? 0 : Math.sin(visualTime * 30) * 5;
+    path([[RULES.boatX - 26, y + 3], [RULES.boatX - 26 - length - flicker, y + 8], [RULES.boatX - 26, y + 12]], "#ffae43", "#98501e");
+    path([[RULES.boatX - 27, y + 5], [RULES.boatX - 27 - length * .65, y + 8], [RULES.boatX - 27, y + 10]], "#fff3ab");
+    ctx.strokeStyle = "#f4fff0"; ctx.lineWidth = 3;
     for (let i = 0; i < 3; i++) {
-      const offset = reducedMotion ? 0 : (visualTime * 80 + i * 15) % 24;
+      const offset = reducedMotion ? 0 : (visualTime * 100 + i * 15) % 24;
       ctx.beginPath();
-      ctx.moveTo(RULES.boatX - 35 - offset, y + 8 + i * 6);
-      ctx.lineTo(RULES.boatX - 72 - offset, y + 8 + i * 6);
+      ctx.moveTo(RULES.boatX - 35 - offset, y + 17 + i * 7);
+      ctx.lineTo(RULES.boatX - 85 - offset, y + 17 + i * 7);
       ctx.stroke();
+      ctx.beginPath(); ctx.arc(RULES.boatX - 45 - offset, y + 14 + i * 7, 2.5, 0, Math.PI * 2); ctx.fillStyle = "#f4fff0"; ctx.fill();
     }
+    ctx.restore();
   }
   rounded(20, 240, 6, 235, 3, "#eff7e651");
   rounded(20, y - 4, 6, 8, 3, "#fff5d6");
@@ -776,7 +794,7 @@ function frame(time) {
         wasBoosting = boosting();
     }
     sparkles = sparkles.filter(sparkle => (sparkle.life -= dt) > 0);
-    if (game.pickups.length || game.passEvents.length) {
+    if (game.pickups.length || game.passEvents.length || game.giftEvents.length) {
       try {
         const earned = progress.recordRun(game, runId);
         if (earned.length) {
@@ -790,6 +808,10 @@ function frame(time) {
       }
       renderProgress();
     }
+    for (const gift of game.giftEvents) {
+      sound.play("gift");
+      $("announcement").textContent = `${GIFTS[gift.effect].label} collected.`;
+    }
     if (game.pickups.length) {
       $("run-coins").textContent = String(game.collected);
       $("coin-feedback").textContent = `+${game.pickups.length} coin${game.pickups.length === 1 ? "" : "s"} · Nice catch!`;
@@ -799,6 +821,24 @@ function frame(time) {
     } else if (feedbackTime > 0) {
       feedbackTime -= dt;
       if (feedbackTime <= 0) $("coin-feedback").textContent = "Follow the gold. Find your flow.";
+    }
+    const effect = game.effect;
+    const feedback = game.giftFeedback;
+    const giftStatus = $("gift-status");
+    giftStatus.hidden = !effect && !feedback && game.handoff <= 0;
+    if (effect) {
+      const info = GIFTS[effect.type];
+      giftStatus.style.borderColor = info.color;
+      const warning = effect.type === "autopilot" && effect.remaining <= 2
+        ? " · Take control soon; finishing safe passage" : "";
+      giftStatus.textContent = `${info.icon} ${info.label} · ${Math.ceil(effect.remaining)}s${warning}`;
+    } else if (game.handoff > 0) {
+      giftStatus.style.borderColor = GIFTS.autopilot.color;
+      giftStatus.textContent = `Take control now · gentle pace ${Math.ceil(game.handoff)}s · Hold to rise, release to fall`;
+    } else if (feedback) {
+      const info = GIFTS[feedback.type];
+      giftStatus.style.borderColor = info.color;
+      giftStatus.textContent = feedback.type === "coins" ? "+10 coins saved to bank" : `${info.icon} ${info.label} ended`;
     }
     for (const pass of game.passEvents) {
       $("combo").textContent = pass.perfect

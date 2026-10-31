@@ -28,13 +28,13 @@ const newRunId = () => Array.from(crypto.getRandomValues(new Uint32Array(4)), wo
 
 const isCount = value => Number.isSafeInteger(value) && value >= 0;
 const fresh = coins => ({
-  version: 4, coins, owned: ["paper"], selected: "paper", completed: [], dailyBests: {}, legacyDailyBests: {}, archivedBoostDailyBests: {},
+  version: 5, coins, owned: ["paper"], selected: "paper", completed: [], dailyBests: {}, legacyDailyBests: {}, archivedBoostDailyBests: {}, archivedT10DailyBests: {},
   totals: counts(), dailyGoals: {}, runs: {},
 });
 
 function decode(raw) {
   const data = JSON.parse(raw);
-  if (!data || ![1, 2, 3, 4].includes(data.version) || !isCount(data.coins)
+  if (!data || ![1, 2, 3, 4, 5].includes(data.version) || !isCount(data.coins)
     || !Array.isArray(data.owned) || !data.owned.includes("paper") || data.owned.some(id => !Object.hasOwn(SKINS, id))
     || !data.owned.includes(data.selected) || !Array.isArray(data.completed)
     || data.completed.some(id => !MISSIONS.some(mission => mission.id === id))
@@ -44,7 +44,7 @@ function decode(raw) {
   if (data.version >= 2 && (!validCounts(data.totals) || !isObject(data.dailyGoals) || !isObject(data.runs)
     || Object.entries(data.dailyGoals).some(([date, goal]) => !isDate(date) || !validCounts(goal)
       || !Array.isArray(goal.claimed) || goal.claimed.some(id => !METRICS.includes(id)))
-    || Object.entries(data.runs).some(([id, run]) => !/^[a-zA-Z0-9-]{1,80}$/.test(id) || !isDate(run.date) || !validCounts(run)))) {
+    || Object.entries(data.runs).some(([id, run]) => !/^[a-zA-Z0-9-]{1,80}$/.test(id) || !isDate(run.date) || !validCounts(run) || (run.giftCoins !== undefined && !isCount(run.giftCoins))))) {
     throw new Error("Saved goals or mastery are invalid. Existing data has not been overwritten.");
   }
   if (data.version < 4) {
@@ -54,10 +54,11 @@ function decode(raw) {
     return {
       ...fresh(data.coins),
       ...data,
-      version: 4,
+      version: 5,
       dailyBests: {},
       legacyDailyBests,
       archivedBoostDailyBests: data.version === 3 ? data.dailyBests : {},
+      archivedT10DailyBests: {},
       totals: data.version === 1 ? counts() : data.totals,
       dailyGoals: data.version === 1 ? {} : data.dailyGoals,
       runs: data.version === 1 ? {} : data.runs,
@@ -66,6 +67,8 @@ function decode(raw) {
   if (!validDailyScores(data.legacyDailyBests) || !validDailyScores(data.archivedBoostDailyBests)) {
     throw new Error("Saved prior-rule records are invalid. Existing data has not been overwritten.");
   }
+  if (data.version === 4) return { ...data, version: 5, dailyBests: {}, archivedT10DailyBests: data.dailyBests };
+  if (!validDailyScores(data.archivedT10DailyBests)) throw new Error("Saved T10 records are invalid. Existing data has not been overwritten.");
   return data;
 }
 
@@ -141,10 +144,15 @@ export class ProgressStore {
   }
 
   recordRun(run, id) {
-    if (!validCounts(run)) throw new RangeError("Invalid run counters");
+    if (!validCounts(run) || (run.giftCoins !== undefined && !isCount(run.giftCoins))) throw new RangeError("Invalid run counters");
     return this.change(next => {
       if (!Object.hasOwn(next.runs, id)) throw new Error("This run receipt is no longer available. Reload to start a new run and save progress.");
       const previous = next.runs[id];
+      const giftCoins = run.giftCoins || 0;
+      const previousGiftCoins = previous.giftCoins || 0;
+      if (giftCoins < previousGiftCoins) throw new Error("Gift coin counters cannot go backwards.");
+      const giftDelta = giftCoins - previousGiftCoins;
+      previous.giftCoins = giftCoins;
       if (METRICS.some(metric => run[metric] < previous[metric])) throw new Error("Run counters cannot go backwards.");
       const delta = Object.fromEntries(METRICS.map(metric => [metric, run[metric] - previous[metric]]));
       const date = previous.date;
@@ -170,7 +178,7 @@ export class ProgressStore {
           earned.push({ label: `${badge.label}: ${SKINS[badge.skin].name} unlocked`, reward: 0 });
         }
       }
-      next.coins = Math.min(Number.MAX_SAFE_INTEGER, next.coins + delta.collected + earned.reduce((sum, mission) => sum + mission.reward, 0));
+      next.coins = Math.min(Number.MAX_SAFE_INTEGER, next.coins + delta.collected + giftDelta + earned.reduce((sum, mission) => sum + mission.reward, 0));
       return earned;
     });
   }

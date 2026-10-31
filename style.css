@@ -27,6 +27,8 @@ small { font-size: 14px; margin-left: 4px; color: #789087; }
 .coin-bar { flex-wrap: wrap; }
 .run-status { display: flex; justify-content: space-between; gap: 12px; padding: 0 30px 10px; font-size: 10px; color: #50766b; }
 .run-status #combo { text-align: right; }
+.gift-status { margin: 0 18px 8px; padding: 6px 10px; border: 2px solid #b095dc; border-radius: 10px; color: #49325d; background: #fff5dd; font-size: 11px; font-weight: bold; }
+.gift-status[hidden] { display: none; }
 .studio { margin-top: 12px; padding: 12px 18px; background: #faf9f1; border: 1px solid #d7dfd1; border-radius: 16px; font-size: 12px; }
 .studio summary { cursor: pointer; min-height: 28px; line-height: 28px; font-weight: bold; }
 #mission-summary { font-weight: normal; color: #68817a; margin-left: 10px; font-size: 10px; }

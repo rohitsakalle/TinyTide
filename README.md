@@ -48,7 +48,7 @@ reselected for free. Selection is locked during runs and pauses. Hull/sail color
 size, coin collection or scoring. There is no cash value, real-money payment or
 account sync. Records, coins and sound preference are local to this browser.
 
-Existing coin balances and earlier saves migrate into version 4 of the same
+Existing coin balances and earlier saves migrate into version 5 of the same
 `tiny-tide-progress-v1` storage key, preserving bank, owned/selected boats,
 original completed missions and recent daily records. New cumulative metrics
 start at zero: the old bank mixes pickups, rewards and spending, and there is no
@@ -140,7 +140,7 @@ failed sharing offers a separate Copy result action and selectable manual text;
 cancelling a share doesn't copy anything. Clipboard permission errors are
 explained, not reported as success. The result freezes the run's UTC date, score,
 distance, bonus, pickups, clears and perfect passes, plus the game URL, fixed
-Medium profile and **`tide-boost-3`** course/physics/scoring rules version.
+Medium profile and **`tide-gifts-4`** course/physics/scoring rules version.
 Boost changes possible score pace, so prior daily bests are retained separately
 in `legacyDailyBests` (pre-boost) and `archivedBoostDailyBests` (earlier boost rules)
 and never compared as if they used the same rules. Existing
@@ -207,12 +207,42 @@ packaging are outside this milestone. For future releases, bump the cache
 version in `sw.js` whenever changing cached assets.
 The cache is isolated by service-worker scope so repository-subpath deployments
 do not replace caches belonging to other Tiny Tide previews on the same origin.
-**Build T10** is visible in the footer. Navigations try the network first, with
+**Build T11** is visible in the local footer. Navigations try the network first, with
 the cached shell as an offline fallback. When a new worker replaces an existing
 controller, an idle page reloads once; an active/paused/crashing run is not
 interrupted. An explicit update button is shown and the automatic reload waits
 until the run ends. A page still executing older code may need one manual
 online reload before this behavior is available.
+
+## Surprise boxes (local T11 update)
+
+Purple ribbon boxes marked `?` appear occasionally along safe coin routes.
+Collecting one reveals **Booster pack** (6 seconds of automatic 1.60x boost),
+**Slow-motion** (6 seconds at 0.60x normal pace), **Autopilot** (8 seconds of
+automatic tide control), or **+10 coins** immediately saved to the bank.
+The status strip shows the revealed icon, color and remaining active time, with
+a synthesized pickup sound that respects mute. Timed gifts replace the current
+timed effect, never multiply or stack; +10 coins does not interrupt it.
+Slow-motion takes priority over manually held boost. Pausing freezes timers;
+crashing/restarting clears temporary effects. Gift coins have a separate run
+receipt, so retry/reload cannot repay them and they never count as actual
+pickups toward mastery or coin missions.
+
+Autopilot warns during its final two seconds, finishes any current obstacle
+passage, then gives control back with two seconds of gentle 0.60x pace.
+Prepare to hold/release the tide when the status says **Take control now**.
+No shield, magnet, energy meter, purchases or additional effect systems are added.
+Boxes and their revealed effects come from course generation, not player timing:
+Daily courses use identical seeds, placements and effects across frame rates
+and boost inputs. Comparisons use `tide-gifts-4`; T10 Daily scores are archived
+separately in `archivedT10DailyBests`, with older records/inventory also retained.
+Save schema is now version 5. New Endless bests use the new rules key.
+
+Manual boost and Booster pack draw a bright outlined jet, inner glow, foam
+streaks and spray behind the boat; the trail fades with the existing boost ramp.
+Reduced-motion uses a steady shorter jet and calm foam rather than moving spray.
+This update displays **Build T11** and uses offline cache v11. It is not on the
+public Pages site until separately approved for publication.
 
 ## Checks
 
@@ -230,7 +260,11 @@ boosted-speed reachability and Daily layout invariance under boost schedules,
 crash/results ordering and one-time settlement, multitouch boost/tide and
 keyboard release, reduced-motion and muted crash behavior, new best-rule
 migration, separate daily records, scenery, and sound unlock/mute/error flows
-in an isolated game frame. The UI tests restore the prior local data afterward; don't play in another
+in an isolated game frame. Surprise checks cover seeded placement/reveal,
+effect replacement, bounded speed, safe Autopilot handoff, frozen pause timers,
+gift reward persistence/idempotency and pickup-independent mastery, plus T10
+score migration and all four effect labels in the actual UI.
+The UI tests restore the prior local data afterward; don't play in another
 tab while the isolated tests run. Sound lifecycle tests use a deterministic Web
 Audio double, plus real Web Audio offline rendering to check non-silent output
 and cancellation. Real-device speaker quality and browser gesture policy still

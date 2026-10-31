@@ -1,5 +1,5 @@
 // Increment when competitive course generation, physics or scoring rules change.
-export const DAILY_RULES = "tide-boost-3";
+export const DAILY_RULES = "tide-gifts-4";
 export const GAME_URL = "https://rohitsakalle.github.io/TinyTide/";
 
 export function dailyResultText(result) {
@@ -7,6 +7,7 @@ export function dailyResultText(result) {
     `Tiny Tide Daily · ${result.date} UTC`,
     `${result.score} points · ${result.distance} m · ${result.bonus} bonus points`,
     `${result.coins} coins · ${result.passed} obstacles · ${result.perfects} perfect passes`,
+    `${result.giftCoins || 0} gift coins · seeded surprise effects`,
     `Fixed Medium · ${DAILY_RULES}`,
     GAME_URL,
   ].join("\n");

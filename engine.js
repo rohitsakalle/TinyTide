@@ -8,6 +8,12 @@ export const MODES = Object.freeze({
   medium: Object.freeze({ label: "Medium", startSpeed: 145, maxSpeed: 220 }),
   fast: Object.freeze({ label: "Fast", startSpeed: 190, maxSpeed: 275 }),
 });
+export const GIFTS = Object.freeze({
+  booster: { label: "Booster pack", icon: ">>", color: "#e59335", duration: 6 },
+  slow: { label: "Slow-motion", icon: "~", color: "#67bad0", duration: 6 },
+  autopilot: { label: "Autopilot", icon: "A", color: "#b095dc", duration: 8 },
+  coins: { label: "+10 coins", icon: "+10", color: "#e1bb47", duration: 0 },
+});
 
 export function minimumViewWidth(mode) {
   return Math.max(560, Math.ceil(MODES[mode].maxSpeed * RULES.boostFactor * (1 / RULES.tideRate + .5) + RULES.boatX + RULES.boatHalfWidth));
@@ -53,6 +59,12 @@ export class TideGame {
     this.spawnCount = 0;
     this.lastType = "bridge";
     this.boostAmount = 0;
+    this.gifts = [];
+    this.giftEvents = [];
+    this.giftCoins = 0;
+    this.effect = null;
+    this.handoff = 0;
+    this.giftFeedback = null;
     this.spawn(720);
   }
 
@@ -74,6 +86,10 @@ export class TideGame {
     for (const offset of [90, 35, -20]) {
       this.coins.push({ x: x - offset, y: waterY(type === "rock" ? 1 : 0) - 18 });
     }
+    if (this.spawnCount % 4 === 2) {
+      const effect = Object.keys(GIFTS)[Math.floor(this.random() * 4)];
+      this.gifts.push({ x: x - 70, y: waterY(type === "rock" ? 1 : 0) - 18, effect });
+    }
     return obstacle;
   }
 
@@ -81,6 +97,7 @@ export class TideGame {
     if (!Number.isFinite(dt) || dt < 0) throw new RangeError("dt must be finite and non-negative");
     this.pickups = [];
     this.passEvents = [];
+    this.giftEvents = [];
     if (this.failure) return;
     // Fixed ticks keep seeded courses identical across display frame rates.
     const step = 1 / 120;
@@ -88,10 +105,27 @@ export class TideGame {
     while (this.accumulator + 1e-10 >= step && !this.failure) {
       this.accumulator = Math.max(0, this.accumulator - step);
       this.elapsed += step;
-      this.lift = Math.max(0, Math.min(1, this.lift + (holding ? 1 : -1) * RULES.tideRate * step));
+      if (this.giftFeedback) {
+        this.giftFeedback.remaining -= step;
+        if (this.giftFeedback.remaining <= 0) this.giftFeedback = null;
+      }
+      if (this.effect) {
+        this.effect.remaining = Math.max(0, this.effect.remaining - step);
+        // Finish the current passage before giving the tide back to the player.
+        if (this.effect.remaining === 0 && (this.effect.type !== "autopilot" || !this.effect.exitObstacle || this.effect.exitObstacle.passed)) {
+          if (this.effect.type === "autopilot") this.handoff = 2;
+          this.effect = null;
+        }
+      }
+      const auto = this.effect?.type === "autopilot";
+      if (auto && this.effect.remaining > 0) this.effect.exitObstacle = this.next;
+      const tideHolding = auto ? this.next?.type === "rock" : holding;
+      this.lift = Math.max(0, Math.min(1, this.lift + (tideHolding ? 1 : -1) * RULES.tideRate * step));
       this.baseSpeed = this.difficulty.startSpeed + (this.difficulty.maxSpeed - this.difficulty.startSpeed) * this.progression;
-      this.boostAmount = Math.max(0, Math.min(1, this.boostAmount + (boosting ? 4 : -6) * step));
-      this.speed = this.baseSpeed * (1 + (RULES.boostFactor - 1) * this.boostAmount);
+      this.boostAmount = Math.max(0, Math.min(1, this.boostAmount + (boosting || this.effect?.type === "booster" ? 4 : -6) * step));
+      this.handoff = Math.max(0, this.handoff - step);
+      const slow = this.effect?.type === "slow" || this.handoff > 0;
+      this.speed = this.baseSpeed * (slow ? .6 : 1 + (RULES.boostFactor - 1) * this.boostAmount);
       this.distance += this.speed * step;
       const left = this.distance + RULES.boatX - RULES.boatHalfWidth;
       const right = this.distance + RULES.boatX + RULES.boatHalfWidth;
@@ -123,7 +157,26 @@ export class TideGame {
             this.pickups.push({ x: coin.x, y: coin.y });
           }
         }
+        for (const gift of this.gifts) {
+          if (!gift.collected && Math.abs(gift.x - (this.distance + RULES.boatX)) < 30 && Math.abs(gift.y - (y - 18)) < 28) {
+            gift.collected = true;
+            this.giftEvents.push({ ...gift });
+            this.giftFeedback = { type: gift.effect, remaining: 2 };
+            if (gift.effect === "coins") this.giftCoins += 10;
+            else {
+              this.effect = { type: gift.effect, remaining: GIFTS[gift.effect].duration, exitObstacle: null };
+              this.handoff = 0;
+            }
+          }
+        }
       }
+      if (this.failure) {
+        this.effect = null;
+        this.handoff = 0;
+        this.boostAmount = 0;
+        this.giftFeedback = null;
+      }
+      this.gifts = this.gifts.filter(gift => !gift.collected && gift.x > this.distance - 50);
       this.coins = this.coins.filter(coin => !coin.collected && coin.x > this.distance - 50);
       this.obstacles = this.obstacles.filter(o => o.x + o.width > this.distance - 100);
       const last = this.obstacles.at(-1);

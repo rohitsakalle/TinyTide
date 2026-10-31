@@ -1,5 +1,5 @@
 const CACHE_PREFIX = `tiny-tide:${self.registration.scope}:`;
-const CACHE = `${CACHE_PREFIX}v10`;
+const CACHE = `${CACHE_PREFIX}v11`;
 const FILES = ["./", "./index.html", "./style.css", "./app.js", "./engine.js", "./sound.js", "./progress.js", "./sharing.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => {
