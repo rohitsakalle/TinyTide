@@ -1037,7 +1037,7 @@ export async function runBrowserTests() {
       assert(pearl.textContent === "Selected" && Number(el("coin-bank").textContent) === bank);
     });
     await test("Perfect feedback and all scenery themes render without changing hazard interpretation", () => {
-      el("play").click(); frames(1);
+      el("play").click(); frames(3);
       const game = win.testGame;
       const hazards = JSON.stringify(game.obstacles);
       const skies = [];
