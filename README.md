@@ -6,6 +6,8 @@ obstacle; the tide takes time to move. A collision bursts the paper boat into
 clearly visible, outlined fragments with an expanding splash for 1.4 seconds
 before results, retry and your local personal best. Reduced-motion mode uses a
 shorter .35-second, low-motion burst.
+The normal burst includes one warm starburst (not a strobe), larger outlined
+debris and a contrasting water plume. Reduced-motion mode omits the starburst.
 
 Choose **Easy**, **Medium**, or **Fast** with the Pace selector before starting.
 Medium keeps the original pace. Each mode has a separate distance record; old
@@ -13,10 +15,11 @@ records are retained as Medium records. Pace is locked while running or paused,
 and can be changed after a collision. Speed ramps smoothly over **90 active
 seconds** from 105 to 165 world-pixels/s on Easy, 145 to 220 on Medium, and 190
 to 275 on Fast. Flow displays ramp progress and the current speed multiplier.
-Hold **Hold to Boost** or **Right Arrow** for up to 1.35× forward speed without
-affecting the tide. Releasing returns to the current pace; near an obstacle,
-boost protection maintains enough warning for a full tide transition. Boost
-never makes an existing hazard harder to reach. Pause, focus loss, touch
+Hold **Hold to Boost** or **Right Arrow** for **1.60×** forward speed without
+affecting the tide. Boost ramps in over .25 seconds and out over .17 seconds.
+It remains active near obstacles; generation and warning distances budget the
+maximum boosted speed. The BOOST multiplier compares against the current
+unboosted pace, and a brighter wake makes acceleration visible. Pause, focus loss, touch
 cancellation, impact and retry clear boost. On phones, hold the boost and tide
 buttons simultaneously with two fingers. Pause/background time does not advance
 the ramp; retry resets it.
@@ -26,8 +29,7 @@ and lower water under bridges. Patterns tighten by deterministic course order,
 not boost timing, so a UTC Daily seed always gives the same obstacle and coin
 layout. Gaps retain a full-height transition, reaction time, boat overlap and
 coin approach at maximum boosted speed. The visible world gives at least a
-full transition plus 0.5s warning. Near a visible hazard, boost protection
-returns speed toward the selected pace rather than shortening the warning.
+full transition plus 0.5s warning at maximum boost.
 
 Rocks are layered, mossy canal stones; bridges are textured masonry with
 visible lintels and joints. Scene palettes follow the garden, rainy street and
@@ -46,7 +48,7 @@ reselected for free. Selection is locked during runs and pauses. Hull/sail color
 size, coin collection or scoring. There is no cash value, real-money payment or
 account sync. Records, coins and sound preference are local to this browser.
 
-Existing coin balances and earlier saves migrate into version 3 of the same
+Existing coin balances and earlier saves migrate into version 4 of the same
 `tiny-tide-progress-v1` storage key, preserving bank, owned/selected boats,
 original completed missions and recent daily records. New cumulative metrics
 start at zero: the old bank mixes pickups, rewards and spending, and there is no
@@ -138,9 +140,10 @@ failed sharing offers a separate Copy result action and selectable manual text;
 cancelling a share doesn't copy anything. Clipboard permission errors are
 explained, not reported as success. The result freezes the run's UTC date, score,
 distance, bonus, pickups, clears and perfect passes, plus the game URL, fixed
-Medium profile and **`tide-boost-2`** course/physics/scoring rules version.
+Medium profile and **`tide-boost-3`** course/physics/scoring rules version.
 Boost changes possible score pace, so prior daily bests are retained separately
-in `legacyDailyBests` and never compared as if they used the same rules. Existing
+in `legacyDailyBests` (pre-boost) and `archivedBoostDailyBests` (earlier boost rules)
+and never compared as if they used the same rules. Existing
 Endless best keys remain untouched and are labeled as archived previous-rule
 records; new bests use versioned keys. Compare only matching dates and versions.
 Increase `DAILY_RULES` in `sharing.js` when competitive rules change. There is
@@ -204,6 +207,12 @@ packaging are outside this milestone. For future releases, bump the cache
 version in `sw.js` whenever changing cached assets.
 The cache is isolated by service-worker scope so repository-subpath deployments
 do not replace caches belonging to other Tiny Tide previews on the same origin.
+**Build T10** is visible in the footer. Navigations try the network first, with
+the cached shell as an offline fallback. When a new worker replaces an existing
+controller, an idle page reloads once; an active/paused/crashing run is not
+interrupted. An explicit update button is shown and the automatic reload waits
+until the run ends. A page still executing older code may need one manual
+online reload before this behavior is available.
 
 ## Checks
 

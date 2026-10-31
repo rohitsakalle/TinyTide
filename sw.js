@@ -1,5 +1,5 @@
 const CACHE_PREFIX = `tiny-tide:${self.registration.scope}:`;
-const CACHE = `${CACHE_PREFIX}v9`;
+const CACHE = `${CACHE_PREFIX}v10`;
 const FILES = ["./", "./index.html", "./style.css", "./app.js", "./engine.js", "./sound.js", "./progress.js", "./sharing.js", "./manifest.webmanifest", "./icon.svg"];
 
 self.addEventListener("install", event => {
@@ -13,5 +13,20 @@ self.addEventListener("activate", event => {
 self.addEventListener("fetch", event => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || url.origin !== self.location.origin || !url.href.startsWith(self.registration.scope)) return;
+  if (event.request.mode === "navigate") {
+    event.respondWith(fetch(event.request).then(async response => {
+      if (response.ok) {
+        const cache = await caches.open(CACHE);
+        await cache.put(event.request, response.clone());
+        return response;
+      }
+      const cached = await caches.match(event.request);
+      return cached || response;
+    }).catch(async () => {
+      const cached = await caches.match(event.request);
+      return cached || caches.match(new URL("./", self.registration.scope));
+    }));
+    return;
+  }
   event.respondWith(caches.open(CACHE).then(cache => cache.match(event.request)).then(cached => cached || fetch(event.request)));
 });

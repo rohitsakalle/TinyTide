@@ -1,5 +1,5 @@
 // Increment when competitive course generation, physics or scoring rules change.
-export const DAILY_RULES = "tide-boost-2";
+export const DAILY_RULES = "tide-boost-3";
 export const GAME_URL = "https://rohitsakalle.github.io/TinyTide/";
 
 export function dailyResultText(result) {

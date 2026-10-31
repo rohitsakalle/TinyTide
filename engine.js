@@ -1,6 +1,6 @@
 export const RULES = Object.freeze({
   height: 600, boatX: 122, boatHalfWidth: 26, boatHeight: 40, draft: 9,
-  lowWater: 465, travel: 220, tideRate: 0.68, boostFactor: 1.35,
+  lowWater: 465, travel: 220, tideRate: 0.68, boostFactor: 1.6,
   progressionSeconds: 90,
 });
 export const MODES = Object.freeze({
@@ -52,7 +52,7 @@ export class TideGame {
     this.failure = null;
     this.spawnCount = 0;
     this.lastType = "bridge";
-    this.boostLimited = false;
+    this.boostAmount = 0;
     this.spawn(720);
   }
 
@@ -90,18 +90,8 @@ export class TideGame {
       this.elapsed += step;
       this.lift = Math.max(0, Math.min(1, this.lift + (holding ? 1 : -1) * RULES.tideRate * step));
       this.baseSpeed = this.difficulty.startSpeed + (this.difficulty.maxSpeed - this.difficulty.startSpeed) * this.progression;
-      this.speed = this.baseSpeed;
-      this.boostLimited = false;
-      if (boosting) {
-        const boostedSpeed = this.baseSpeed * RULES.boostFactor;
-        const next = this.next;
-        if (next) {
-          const lead = next.x - (this.distance + RULES.boatX + RULES.boatHalfWidth);
-          const safeSpeed = Math.max(this.baseSpeed, lead / (1 / RULES.tideRate + .5));
-          this.speed = Math.min(boostedSpeed, safeSpeed);
-          this.boostLimited = this.speed < boostedSpeed;
-        } else this.speed = boostedSpeed;
-      }
+      this.boostAmount = Math.max(0, Math.min(1, this.boostAmount + (boosting ? 4 : -6) * step));
+      this.speed = this.baseSpeed * (1 + (RULES.boostFactor - 1) * this.boostAmount);
       this.distance += this.speed * step;
       const left = this.distance + RULES.boatX - RULES.boatHalfWidth;
       const right = this.distance + RULES.boatX + RULES.boatHalfWidth;

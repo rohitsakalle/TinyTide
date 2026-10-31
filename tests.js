@@ -68,18 +68,42 @@ export function runTests() {
       assert(Math.abs(game.lift - games[0].lift) < 1e-9);
     }
   });
-  test("Forward boost is meaningful, leaves tide control independent and protects nearby transitions", () => {
+  test("Forward boost ramps to 1.6x independently of tide and remains active near hazards", () => {
     const normal = new TideGame(seeded(42), "medium");
     const boosted = new TideGame(seeded(42), "medium");
-    normal.update(1 / 120, false);
-    boosted.update(1 / 120, false, true);
+    for (let tick = 0; tick < 32; tick++) {
+      normal.update(1 / 120, true);
+      boosted.update(1 / 120, true, true);
+    }
     assert(Math.abs(boosted.speed / normal.speed - RULES.boostFactor) < .001);
     assert(normal.lift === boosted.lift, "Boost changed water height");
     const close = new TideGame(seeded(42), "medium");
     close.obstacles = [{ type: "rock", x: RULES.boatX + RULES.boatHalfWidth + 80, width: 60, edge: 340, passed: false }];
-    close.update(1 / 120, false, true);
-    assert(close.speed === close.baseSpeed && close.boostLimited, "Boost outran the full-transition warning");
+    close.lift = 1;
+    for (let tick = 0; tick < 32; tick++) close.update(1 / 120, true, true);
+    assert(close.speed > close.baseSpeed * 1.59 && !close.failure, "Boost was cancelled near a safely cleared hazard");
     assert(minimumViewWidth("fast") - RULES.boatX - RULES.boatHalfWidth >= MODES.fast.maxSpeed * RULES.boostFactor * (1 / RULES.tideRate + .5) - 1e-9);
+    for (const mode of Object.keys(MODES)) {
+      const plain = new TideGame(seeded(81), mode);
+      const fast = new TideGame(seeded(81), mode);
+      for (const game of [plain, fast]) {
+        game.lift = 1;
+        game.obstacles = [{ type: "rock", x: 400, width: 200, edge: 340, passed: false }];
+      }
+      for (let tick = 0; tick < 32; tick++) {
+        plain.update(1 / 120, true);
+        fast.update(1 / 120, true, true);
+      }
+      const plainStart = plain.distance;
+      const fastStart = fast.distance;
+      for (let tick = 0; tick < 120; tick++) {
+        plain.update(1 / 120, true);
+        fast.update(1 / 120, true, true);
+      }
+      assert(!plain.failure && !fast.failure);
+      const ratio = (fast.distance - fastStart) / (plain.distance - plainStart);
+      assert(Math.abs(ratio - 1.6) < .001, `${mode}: near-obstacle distance/sec ratio ${ratio}`);
+    }
   });
   test("Invalid time rejected, long stalls capped", () => {
     const game = new TideGame();
@@ -256,13 +280,13 @@ export function runTests() {
     const values = new Map([[PROGRESS_KEY, JSON.stringify(legacy)]]);
     const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
     const store = new ProgressStore(storage);
-    assert(store.data.version === 3 && store.data.coins === 123 && store.data.selected === "mint");
+    assert(store.data.version === 4 && store.data.coins === 123 && store.data.selected === "mint");
     assert(store.data.owned.includes("mint") && store.data.completed.includes("passes5") && store.data.dailyBests["2026-10-27"] === undefined);
     assert(store.data.legacyDailyBests["2026-10-27"] === 45, "Old daily record was not archived");
     assert(Object.values(store.data.totals).every(total => total === 0));
     assert(values.get(PROGRESS_KEY) === JSON.stringify(legacy), "Read-only migration changed stored data");
     store.beginRun("2026-10-28", "v1-upgrade");
-    assert(JSON.parse(values.get(PROGRESS_KEY)).version === 3);
+    assert(JSON.parse(values.get(PROGRESS_KEY)).version === 4);
     assert(new ProgressStore(storage).data.coins === 123);
   });
   test("V2 saves keep prior-rule daily bests separate from new boosted rules", () => {
@@ -278,6 +302,26 @@ export function runTests() {
     assert(store.data.legacyDailyBests["2026-10-30"] === 120);
     store.recordDaily("2026-10-30", 80);
     assert(store.data.dailyBests["2026-10-30"] === 80 && store.data.legacyDailyBests["2026-10-30"] === 120);
+  });
+  test("T9 saves archive boosted records without losing older records, coins or mastery", () => {
+    const values = new Map();
+    const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+    const original = new ProgressStore(storage);
+    original.chooseSkin("paper");
+    const data = structuredClone(original.data);
+    data.version = 3;
+    delete data.archivedBoostDailyBests;
+    data.coins = 25;
+    data.totals.collected = 17;
+    data.dailyBests["2026-10-31"] = 90;
+    data.legacyDailyBests["2026-10-31"] = 70;
+    values.set(PROGRESS_KEY, JSON.stringify(data));
+    const migrated = new ProgressStore(storage);
+    assert(migrated.data.version === 4 && migrated.data.coins === 25 && migrated.data.totals.collected === 17);
+    assert(migrated.data.dailyBests["2026-10-31"] === undefined);
+    assert(migrated.data.archivedBoostDailyBests["2026-10-31"] === 90 && migrated.data.legacyDailyBests["2026-10-31"] === 70);
+    migrated.recordDaily("2026-10-31", 100);
+    assert(new ProgressStore(storage).data.dailyBests["2026-10-31"] === 100);
   });
   test("Rotating daily missions aggregate short runs and pay once even after reload/clock rollback", () => {
     const values = new Map();
@@ -586,7 +630,7 @@ export async function runBrowserTests() {
       frames(2);
       assert(win.testGame.speed > base && el("flow").textContent.includes("BOOST"));
       key("keyup", "ArrowRight");
-      frames(1);
+      frames(12);
       assert(win.testGame.speed === win.testGame.baseSpeed && !el("boost").classList.contains("active"));
     });
     await test("Pause freezes score, resume clears held keys, blur pauses", () => {
@@ -615,8 +659,9 @@ export async function runBrowserTests() {
       }
       pointer("pointerdown", 10);
       pointer("pointerdown", 11);
-      frames(1);
+      frames(16);
       assert(el("tide").classList.contains("active") && el("boost").classList.contains("active"));
+      assert(win.testGame.speed / win.testGame.baseSpeed > 1.59, "Touch boost did not reach 1.6x speed");
       pointer("pointercancel", 10);
       frames(1);
       assert(!el("tide").classList.contains("active") && el("boost").classList.contains("active"), "Cancelling tide cleared boost or kept water raised");
@@ -1038,6 +1083,16 @@ export async function runBrowserTests() {
       assert(el("impact").hidden && !el("run-result").hidden, "Reduced-motion crash did not finish promptly");
       assert(win.audioStats.notes === 0, "Muted crash played audio");
       win.parent.testReducedMotion = false;
+    });
+    await test("Worker replacement offers update without interrupting active or paused play", () => {
+      el("play").click(); frames(1);
+      const run = win.testGame;
+      win.navigator.serviceWorker.dispatchEvent(new win.Event("controllerchange"));
+      assert(!el("update-game").hidden && el("overlay").hidden && win.testGame === run);
+      key("keydown", "KeyP");
+      win.navigator.serviceWorker.dispatchEvent(new win.Event("controllerchange"));
+      assert(el("overlay-title").textContent === "A moment of calm." && win.testGame === run);
+      assert(el("build").textContent === "Build T10");
     });
   } finally {
     iframe.remove();

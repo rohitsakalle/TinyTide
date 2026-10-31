@@ -9,6 +9,27 @@ const ctx = canvas.getContext("2d");
 const game = new TideGame();
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 let state = "ready";
+let updateReady = false;
+const startedControlled = Boolean(navigator.serviceWorker?.controller);
+function applyUpdateWhenSafe() {
+  if (!updateReady || ["running", "paused", "crashing"].includes(state)) return;
+  try {
+    if (sessionStorage.getItem("tiny-tide-reloaded-build") === "T10") return;
+    sessionStorage.setItem("tiny-tide-reloaded-build", "T10");
+  } catch (error) {
+    console.warn("Tiny Tide could not guard an automatic update reload:", error);
+    $("update-game").hidden = false;
+    return;
+  }
+  location.reload();
+}
+navigator.serviceWorker?.addEventListener("controllerchange", () => {
+  if (!startedControlled) return;
+  updateReady = true;
+  $("update-game").hidden = false;
+  applyUpdateWhenSafe();
+});
+$("update-game").addEventListener("click", () => location.reload());
 let width = 900;
 let lastTime = 0;
 let visualTime = 0;
@@ -45,7 +66,7 @@ try {
     const stored = localStorage.getItem(bestKey(mode));
     const value = Number(stored);
     bests[mode] = stored !== null && Number.isSafeInteger(value) && value >= 0 ? value : 0;
-    const old = Number(localStorage.getItem(`tiny-tide-best-${mode}`) || (mode === "medium" ? localStorage.getItem("tiny-tide-best") : 0));
+    const old = Number(localStorage.getItem(`tiny-tide-best-tide-boost-2-${mode}`) || localStorage.getItem(`tiny-tide-best-${mode}`) || (mode === "medium" ? localStorage.getItem("tiny-tide-best") : 0));
     previousBests[mode] = Number.isSafeInteger(old) && old > 0 ? old : 0;
   }
   best = bests.medium;
@@ -92,7 +113,7 @@ function updateBestPreview() {
   const daily = $("course").value === "daily";
   best = daily ? progress.data.dailyBests[utcDate()] || 0 : bests[$("mode").value];
   $("best").textContent = `${best} pts`;
-  const legacyDaily = progress.data.legacyDailyBests[utcDate()];
+  const legacyDaily = progress.data.archivedBoostDailyBests[utcDate()] || progress.data.legacyDailyBests[utcDate()];
   const previous = daily ? legacyDaily : previousBests[$("mode").value];
   $("previous-best").hidden = !previous;
   $("previous-best").textContent = previous ? `Previous rules: ${previous} pts · archived, not compared` : "";
@@ -216,6 +237,7 @@ function resize() {
 new ResizeObserver(resize).observe(canvas);
 
 function clearInput() {
+  game.boostAmount = 0;
   tidePointers.clear();
   boostPointers.clear();
   tideKeys.clear();
@@ -543,7 +565,28 @@ function drawCrash(skin) {
   const lowMotion = reducedMotion;
   ctx.save();
   ctx.translate(RULES.boatX, crashOrigin.y - 5);
+  if (!lowMotion) {
+    ctx.globalAlpha = .85 * Math.max(0, 1 - progress / .5);
+    const radius = 26 + 65 * ease;
+    const points = Array.from({ length: 16 }, (_, i) => {
+      const angle = i * Math.PI / 8;
+      const r = i % 2 ? radius * .5 : radius;
+      return [Math.cos(angle) * r, Math.sin(angle) * r - 14];
+    });
+    path(points, "#ffcf54", "#b85f27");
+  }
   ctx.globalAlpha = Math.max(.65, 1 - progress * .35);
+  ctx.fillStyle = "#b9eee1";
+  ctx.strokeStyle = "#275d67";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-42, 17);
+  ctx.quadraticCurveTo(-24, -32 * ease, -12, 0);
+  ctx.quadraticCurveTo(0, -55 * ease, 12, 0);
+  ctx.quadraticCurveTo(28, -32 * ease, 42, 17);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
   ctx.strokeStyle = "#f4fff0";
   ctx.lineWidth = lowMotion ? 3 : 4;
   ctx.beginPath();
@@ -551,11 +594,12 @@ function drawCrash(skin) {
   ctx.stroke();
   for (let i = 0; i < 8; i++) {
     const angle = -Math.PI + i * Math.PI / 4;
-    const travel = (lowMotion ? 26 : 78) * ease;
+    const travel = (lowMotion ? 32 : 90) * ease;
     const x = Math.cos(angle) * travel;
     const y = Math.sin(angle) * travel - (lowMotion ? 0 : Math.sin(progress * Math.PI) * 24) + ease * (lowMotion ? 4 : 12);
     ctx.save();
     ctx.translate(x, y);
+    ctx.scale(1.5, 1.5);
     ctx.rotate(angle + progress * (lowMotion ? .2 : 2.8));
     ctx.lineWidth = 1.5;
     if (i % 3 === 0) {
@@ -697,6 +741,17 @@ function draw() {
   const skin = SKINS[progress.data.selected];
   if (state === "crashing") drawCrash(skin);
   else if (!game.failure) drawBoat(skin);
+  if (state === "running" && game.boostAmount > .1) {
+    ctx.strokeStyle = "#fff2a9";
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 3; i++) {
+      const offset = reducedMotion ? 0 : (visualTime * 80 + i * 15) % 24;
+      ctx.beginPath();
+      ctx.moveTo(RULES.boatX - 35 - offset, y + 8 + i * 6);
+      ctx.lineTo(RULES.boatX - 72 - offset, y + 8 + i * 6);
+      ctx.stroke();
+    }
+  }
   rounded(20, 240, 6, 235, 3, "#eff7e651");
   rounded(20, y - 4, 6, 8, 3, "#fff5d6");
 }
@@ -707,8 +762,8 @@ function frame(time) {
   if (state === "running") {
     visualTime += dt;
     game.update(dt, holding(), boosting());
-    const boostLabel = boosting() ? (game.boostLimited ? " · BOOST · SAFE PACE" : " · BOOST") : "";
-    $("flow").textContent = `Flow ${Math.round(game.progression * 100)}% · ${(game.speed / game.difficulty.startSpeed).toFixed(2)}×${boostLabel}`;
+    const boostLabel = game.boostAmount > 0 ? ` · BOOST ${(game.speed / game.baseSpeed).toFixed(2)}×` : "";
+    $("flow").textContent = `Flow ${Math.round(game.progression * 100)}% · ${(game.baseSpeed / game.difficulty.startSpeed).toFixed(2)}×${boostLabel}`;
     if (holding() !== wasHolding) {
       if (visualTime - lastTideSound > .25) {
         sound.play(holding() ? "rise" : "fall");
@@ -767,6 +822,7 @@ function frame(time) {
     renderProgress();
   }
   draw();
+  applyUpdateWhenSafe();
   requestAnimationFrame(frame);
 }
 resize();

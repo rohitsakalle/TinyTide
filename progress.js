@@ -28,13 +28,13 @@ const newRunId = () => Array.from(crypto.getRandomValues(new Uint32Array(4)), wo
 
 const isCount = value => Number.isSafeInteger(value) && value >= 0;
 const fresh = coins => ({
-  version: 3, coins, owned: ["paper"], selected: "paper", completed: [], dailyBests: {}, legacyDailyBests: {},
+  version: 4, coins, owned: ["paper"], selected: "paper", completed: [], dailyBests: {}, legacyDailyBests: {}, archivedBoostDailyBests: {},
   totals: counts(), dailyGoals: {}, runs: {},
 });
 
 function decode(raw) {
   const data = JSON.parse(raw);
-  if (!data || ![1, 2, 3].includes(data.version) || !isCount(data.coins)
+  if (!data || ![1, 2, 3, 4].includes(data.version) || !isCount(data.coins)
     || !Array.isArray(data.owned) || !data.owned.includes("paper") || data.owned.some(id => !Object.hasOwn(SKINS, id))
     || !data.owned.includes(data.selected) || !Array.isArray(data.completed)
     || data.completed.some(id => !MISSIONS.some(mission => mission.id === id))
@@ -47,22 +47,23 @@ function decode(raw) {
     || Object.entries(data.runs).some(([id, run]) => !/^[a-zA-Z0-9-]{1,80}$/.test(id) || !isDate(run.date) || !validCounts(run)))) {
     throw new Error("Saved goals or mastery are invalid. Existing data has not been overwritten.");
   }
-  if (data.version < 3) {
+  if (data.version < 4) {
     // Boosted runs use a new score ruleset; retain old daily records without comparing them.
-    const legacyDailyBests = { ...(data.legacyDailyBests || {}), ...data.dailyBests };
+    const legacyDailyBests = data.version === 3 ? data.legacyDailyBests : { ...(data.legacyDailyBests || {}), ...data.dailyBests };
     if (!validDailyScores(legacyDailyBests)) throw new Error("Saved prior-rule records are invalid. Existing data has not been overwritten.");
     return {
       ...fresh(data.coins),
       ...data,
-      version: 3,
+      version: 4,
       dailyBests: {},
       legacyDailyBests,
+      archivedBoostDailyBests: data.version === 3 ? data.dailyBests : {},
       totals: data.version === 1 ? counts() : data.totals,
       dailyGoals: data.version === 1 ? {} : data.dailyGoals,
       runs: data.version === 1 ? {} : data.runs,
     };
   }
-  if (!validDailyScores(data.legacyDailyBests)) {
+  if (!validDailyScores(data.legacyDailyBests) || !validDailyScores(data.archivedBoostDailyBests)) {
     throw new Error("Saved prior-rule records are invalid. Existing data has not been overwritten.");
   }
   return data;
