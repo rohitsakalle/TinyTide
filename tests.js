@@ -1,6 +1,7 @@
 import { TideGame, RULES, MODES, minimumViewWidth, waterY, sceneryState } from "./engine.js";
 import { TideSound } from "./sound.js";
-import { ProgressStore, PROGRESS_KEY, SKINS, MISSIONS, utcDate, dailyRandom } from "./progress.js";
+import { ProgressStore, PROGRESS_KEY, SKINS, MISSIONS, MASTERY, utcDate, dailyRandom, dailyMissions, bestComparison } from "./progress.js";
+import { DAILY_RULES, GAME_URL, dailyResultText, shareDaily, copyDaily } from "./sharing.js";
 
 function assert(condition, message = "Assertion failed") {
   if (!condition) throw new Error(message);
@@ -195,18 +196,113 @@ export function runTests() {
     assert(store.data.coins === 5);
     const reloaded = new ProgressStore(storage);
     assert(reloaded.data.coins === 5 && reloaded.data.selected === "berry");
-    const run = { collected: 10, passed: 5, perfects: 3 };
-    assert(reloaded.recordRun(run, 1).length === 3);
-    assert(reloaded.data.coins === 51 && reloaded.data.completed.length === 3);
-    assert(reloaded.recordRun(run, 0).length === 0 && reloaded.data.coins === 51);
+    const run = { collected: 12, passed: 5, perfects: 3 };
+    const id = reloaded.beginRun("2026-10-28", "migration-test");
+    assert(reloaded.recordRun(run, id).length === 6);
+    assert(reloaded.data.coins === 83 && reloaded.data.completed.length === 3);
+    assert(reloaded.recordRun(run, id).length === 0 && reloaded.data.coins === 83);
     const again = new ProgressStore(storage);
-    assert(again.recordRun(run, 0).length === 0 && again.data.coins === 51);
+    assert(again.recordRun(run, id).length === 0 && again.data.coins === 83);
     again.recordDaily("2026-10-27", 42);
     again.recordDaily("2026-10-27", 12);
     again.recordDaily("2026-10-28", 99);
     assert(again.data.dailyBests["2026-10-27"] === 42 && again.data.dailyBests["2026-10-28"] === 99);
     assert(values.get("tiny-tide-coins") === "80", "Migration modified legacy data");
-    assert(Object.keys(SKINS).length === 3 && MISSIONS.length === 3);
+    assert(Object.keys(SKINS).length === 5 && MISSIONS.length === 3);
+  });
+  test("V1 saves preserve inventory, missions and records but never invent lifetime totals", () => {
+    const legacy = { version: 1, coins: 123, owned: ["paper", "mint"], selected: "mint", completed: ["passes5"], dailyBests: { "2026-10-27": 45 } };
+    const values = new Map([[PROGRESS_KEY, JSON.stringify(legacy)]]);
+    const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+    const store = new ProgressStore(storage);
+    assert(store.data.version === 2 && store.data.coins === 123 && store.data.selected === "mint");
+    assert(store.data.owned.includes("mint") && store.data.completed.includes("passes5") && store.data.dailyBests["2026-10-27"] === 45);
+    assert(Object.values(store.data.totals).every(total => total === 0));
+    assert(values.get(PROGRESS_KEY) === JSON.stringify(legacy), "Read-only migration changed stored data");
+    store.beginRun("2026-10-28", "v1-upgrade");
+    assert(JSON.parse(values.get(PROGRESS_KEY)).version === 2);
+    assert(new ProgressStore(storage).data.coins === 123);
+  });
+  test("Rotating daily missions aggregate short runs and pay once even after reload/clock rollback", () => {
+    const values = new Map();
+    const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+    const store = new ProgressStore(storage);
+    const date = "2026-10-28";
+    assert(JSON.stringify(dailyMissions(date)) === JSON.stringify(dailyMissions(date)));
+    assert(JSON.stringify(dailyMissions(date)) !== JSON.stringify(dailyMissions("2026-10-29")));
+    assert(dailyMissions(date).length === 3);
+    const id = store.beginRun(date, "short-one");
+    store.recordRun({ collected: 3, passed: 1, perfects: 0 }, id);
+    assert(store.data.dailyGoals[date].collected === 3 && store.data.dailyGoals[date].claimed.length === 0);
+    const second = store.beginRun(date, "short-two");
+    store.recordRun({ collected: 9, passed: 3, perfects: 2 }, second);
+    assert(store.data.dailyGoals[date].claimed.length === 3);
+    const bank = store.data.coins;
+    const totals = JSON.stringify(store.data.totals);
+    assert(store.recordRun({ collected: 9, passed: 3, perfects: 2 }, second).length === 0 && store.data.coins === bank);
+    const reload = new ProgressStore(storage);
+    assert(reload.recordRun({ collected: 9, passed: 3, perfects: 2 }, second).length === 0 && reload.data.coins === bank);
+    assert(JSON.stringify(reload.data.totals) === totals);
+    const future = reload.beginRun("2026-10-29", "next-day");
+    reload.recordRun({ collected: 12, passed: 4, perfects: 2 }, future);
+    assert(reload.data.dailyGoals["2026-10-29"].claimed.length === 3);
+    const rollback = reload.beginRun(date, "clock-back");
+    const earned = reload.recordRun({ collected: 12, passed: 4, perfects: 2 }, rollback);
+    assert(!earned.some(item => item.label.startsWith("Daily:")), "Clock rollback repeated date's reward");
+    let rejected = 0;
+    try { reload.recordRun({ collected: 0, passed: 0, perfects: 0 }, second); } catch { rejected++; }
+    try { reload.beginRun("2026-02-31", "bad-date"); } catch { rejected++; }
+    assert(rejected === 2);
+  });
+  test("Mastery uses actual pickups, survives spending, grants permanent skins and never counts rewards", () => {
+    const values = new Map([["tiny-tide-coins", "80"]]);
+    const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+    const store = new ProgressStore(storage);
+    const id = store.beginRun("2026-10-28", "mastery");
+    store.recordRun({ collected: 50, passed: 25, perfects: 10 }, id);
+    assert(JSON.stringify(store.data.totals) === JSON.stringify({ collected: 50, passed: 25, perfects: 10 }));
+    assert(store.data.owned.includes("pearl") && store.data.owned.includes("solar"));
+    const balance = store.data.coins;
+    store.chooseSkin("pearl");
+    assert(store.data.coins === balance && store.data.selected === "pearl");
+    store.chooseSkin("berry");
+    assert(store.data.coins === balance - 50 && store.data.totals.collected === 50);
+    const reloaded = new ProgressStore(storage);
+    assert(reloaded.data.owned.includes("solar") && MASTERY.every(badge => reloaded.data.totals[badge.metric] >= badge.target));
+    const locked = new ProgressStore({ getItem: () => null, setItem() {} });
+    let rejected = false;
+    try { locked.chooseSkin("solar"); } catch { rejected = true; }
+    assert(rejected && locked.data.owned.length === 1);
+  });
+  test("Daily reward transactions survive failed storage without silent saves or duplicate payouts", () => {
+    const values = new Map();
+    let fail = false, notices = 0;
+    const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => { if (fail) throw Error("Full"); values.set(key, value); } };
+    const store = new ProgressStore(storage, () => notices++);
+    const id = store.beginRun("2026-10-28", "save-failure");
+    fail = true;
+    const run = { collected: 12, passed: 4, perfects: 2 };
+    store.recordRun(run, id);
+    const bank = store.data.coins;
+    store.recordRun(run, id);
+    assert(!store.persistent && notices === 1 && store.data.coins === bank);
+    fail = false;
+    const reload = new ProgressStore(storage);
+    assert(reload.data.coins === 0 && reload.data.dailyGoals["2026-10-28"] === undefined);
+    reload.recordRun(run, id);
+    const savedBank = reload.data.coins;
+    assert(reload.recordRun(run, id).length === 0 && reload.data.coins === savedBank && savedBank === bank);
+    for (let i = 0; i < 32; i++) reload.beginRun("2026-10-28", `receipt-${i}`);
+    let rejected = false;
+    try { reload.recordRun(run, id); } catch { rejected = true; }
+    assert(rejected, "Evicted receipt was silently recounted");
+  });
+  test("Run comparison distinguishes zero/first scores, ties and actual pre-run improvements", () => {
+    assert(!bestComparison(0, 0).toLowerCase().includes("new best"));
+    assert(bestComparison(15, 0).startsWith("First score"));
+    assert(bestComparison(60, 50).includes("+10") && bestComparison(60, 50).includes("50"));
+    assert(bestComparison(50, 50).startsWith("Matched"));
+    assert(bestComparison(30, 50).startsWith("20 points below"));
   });
   test("Insufficient funds, failed saves and invalid progress never spend coins or grant boats", () => {
     const values = new Map([["tiny-tide-coins", "25"]]);
@@ -563,12 +659,15 @@ export async function runBrowserTests() {
         key("keyup", "Space");
       }
       const initialBank = Number(el("coin-bank").textContent);
+      const dailyBefore = JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyGoals[utcDate()]?.claimed || [];
       safeFrames(2100);
       const run = win.testGame;
       const completed = JSON.parse(localStorage.getItem(PROGRESS_KEY)).completed;
       assert(run.collected >= 10 && run.passed >= 5);
       assert(completed.includes("coins10") && completed.includes("passes5"));
-      assert(Number(el("coin-bank").textContent) === initialBank + run.collected + 25);
+      const dailyAfter = JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyGoals[utcDate()];
+      const newDailyRewards = dailyMissions(utcDate()).filter(goal => !dailyBefore.includes(goal.id) && dailyAfter.claimed.includes(goal.id)).reduce((sum, goal) => sum + goal.reward, 0);
+      assert(Number(el("coin-bank").textContent) === initialBank + run.collected + 25 + newDailyRewards);
       assert(el("missions").textContent.includes("Complete") && el("mission-feedback").textContent.includes("complete!"));
       assert(el("flow").textContent !== "Flow 0% · 1.00×");
       key("keydown", "KeyP");
@@ -589,8 +688,10 @@ export async function runBrowserTests() {
       win.testGame.failure = "rock";
       frames(1);
     });
-    await test("Daily retries repeat the course and a UTC-midnight run keeps its starting date", () => {
+    await test("Daily retries repeat the course and a UTC-midnight run keeps its starting date", async () => {
       const OriginalDate = win.Date;
+      const clipboard = Object.getOwnPropertyDescriptor(win.navigator, "clipboard");
+      Object.defineProperty(win.navigator, "clipboard", { configurable: true, value: undefined });
       let now = "2030-01-01T23:59:59.000Z";
       win.Date = class extends OriginalDate {
         constructor(...args) { super(...(args.length ? args : [now])); }
@@ -598,12 +699,23 @@ export async function runBrowserTests() {
       try {
         el("play").click(); frames(1);
         const opening = JSON.stringify({ obstacles: win.testGame.obstacles, coins: win.testGame.coins });
-        frames(60);
+        key("keydown", "Space"); frames(270); key("keyup", "Space");
+        assert(JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyGoals["2030-01-01"].collected === 3);
         now = "2030-01-02T00:00:01.000Z";
+        const game = win.testGame;
+        game.coins.push({ x: game.distance + RULES.boatX, y: waterY(game.lift) - 18 });
+        frames(1);
+        assert(JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyGoals["2030-01-01"].collected === 4);
+        assert(!JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyGoals["2030-01-02"]);
+        assert(el("daily-missions-date").textContent.includes("2030-01-01"));
         win.testGame.failure = "rock"; frames(1);
         const saved = JSON.parse(localStorage.getItem(PROGRESS_KEY));
         assert(saved.dailyBests["2030-01-01"] > 0 && !saved.dailyBests["2030-01-02"]);
         assert(el("daily-date").textContent.includes("2030-01-01 UTC"));
+        assert(el("daily-missions-date").textContent.includes("2030-01-02"));
+        assert(el("result-goal").textContent.includes("2030-01-01"));
+        el("copy-result").click(); await wait();
+        assert(el("share-text").value.includes("2030-01-01 UTC") && !el("share-text").value.includes("2030-01-02"), "Shared result changed date after midnight");
         now = "2030-01-01T23:59:59.000Z";
         el("play").click(); frames(1);
         assert(JSON.stringify({ obstacles: win.testGame.obstacles, coins: win.testGame.coins }) === opening, "Daily retry rerolled the opening");
@@ -613,13 +725,17 @@ export async function runBrowserTests() {
         assert(el("daily-date").textContent.includes("2030-01-02 UTC"));
         frames(60); win.testGame.failure = "rock"; frames(1);
         assert(JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyBests["2030-01-02"] > 0);
-      } finally { win.Date = OriginalDate; }
+      } finally {
+        win.Date = OriginalDate;
+        if (clipboard) Object.defineProperty(win.navigator, "clipboard", clipboard);
+        else delete win.navigator.clipboard;
+      }
     });
     await test("Boat shop previews, spends once, locks during play and persists selection", async () => {
       el("studio").open = true;
       await wait();
       const mint = doc.querySelector('[data-skin="mint"]');
-      assert(doc.querySelectorAll(".skin-preview").length === 3);
+      assert(doc.querySelectorAll(".skin-preview").length === 5);
       assert(mint.textContent.includes("25 coins") && !mint.disabled);
       const bank = Number(el("coin-bank").textContent);
       mint.click();
@@ -637,7 +753,7 @@ export async function runBrowserTests() {
       assert(!el("course").disabled, "Studio keyboard interaction started gameplay");
       el("play").click();
       frames(1);
-      assert(doc.querySelectorAll(".skin-card button:disabled").length === 3);
+      assert(doc.querySelectorAll(".skin-card button:disabled").length === 5);
       const saved = JSON.parse(localStorage.getItem(PROGRESS_KEY));
       assert(saved.selected === "mint" && saved.owned.includes("mint"));
       win.testGame.failure = "rock";
@@ -650,6 +766,26 @@ export async function runBrowserTests() {
       await wait();
       assert(doc.querySelector('[data-skin="mint"]').textContent === "Selected");
       assert(Number(el("coin-bank").textContent) === bank - 25);
+    });
+    await test("Mastery badges and free earned boats update visibly without spending or repeated rewards", () => {
+      el("play").click(); frames(1);
+      win.testGame.collected = 50;
+      win.testGame.passed = 25;
+      win.testGame.perfects = 10;
+      win.testGame.coins.push({ x: win.testGame.distance + RULES.boatX, y: waterY(win.testGame.lift) - 18 });
+      frames(1);
+      const data = JSON.parse(localStorage.getItem(PROGRESS_KEY));
+      assert(data.owned.includes("pearl") && data.owned.includes("solar"));
+      assert(el("mastery").textContent.includes("Pearl drifter unlocked") && el("mastery").textContent.includes("Solar sailor unlocked"));
+      assert(el("mastery-next").textContent.includes("All three badges earned"));
+      const bank = data.coins;
+      frames(10);
+      assert(Number(el("coin-bank").textContent) === bank, "Repeated counters paid again");
+      win.testGame.failure = "rock"; frames(1);
+      const pearl = doc.querySelector('[data-skin="pearl"]');
+      assert(!pearl.disabled && pearl.textContent === "Select");
+      pearl.click();
+      assert(pearl.textContent === "Selected" && Number(el("coin-bank").textContent) === bank);
     });
     await test("Perfect feedback and all scenery themes render without changing hazard interpretation", () => {
       el("play").click(); frames(1);
@@ -673,6 +809,75 @@ export async function runBrowserTests() {
       assert(game.bonus === 5 && Number(el("score").textContent) === game.score);
       game.failure = "rock"; frames(1);
       assert(win.testErrors.length === 0, win.testErrors.join("; "));
+    });
+    await test("Results compare with pre-run best, show actual goals and allow immediate retry", () => {
+      el("course").value = "endless"; el("course").dispatchEvent(new win.Event("change"));
+      el("mode").value = "medium"; el("mode").dispatchEvent(new win.Event("change"));
+      const previous = Number(el("best").textContent.split(" ")[0]);
+      el("play").click(); frames(1);
+      win.testGame.failure = "rock"; frames(1);
+      assert(!el("run-result").hidden && el("result-comparison").textContent.includes(bestComparison(0, previous)));
+      assert(!el("overlay-kicker").textContent.includes("NEW"));
+      assert((el("result-goal").textContent.includes("/") || el("result-goal").textContent.includes("all mastery complete")) && el("share-options").hidden);
+      el("play").click(); frames(1);
+      assert(el("run-result").hidden);
+      win.testGame.failure = "rock"; frames(1);
+      el("course").value = "daily"; el("course").dispatchEvent(new win.Event("change"));
+    });
+    await test("Optional Daily sharing freezes run stats and handles cancel/unsupported/error/copy explicitly", async () => {
+      const descriptors = new Map(["share", "clipboard"].map(key => [key, Object.getOwnPropertyDescriptor(win.navigator, key)]));
+      const set = (key, value) => Object.defineProperty(win.navigator, key, { configurable: true, value });
+      let shares = 0, copies = 0;
+      try {
+        set("share", undefined);
+        set("clipboard", undefined);
+        el("play").click(); frames(60);
+        const score = win.testGame.score;
+        win.testGame.failure = "rock"; frames(1);
+        assert(!el("share-options").hidden);
+        el("share-options").open = true;
+        el("share-result").click(); await wait();
+        assert(el("share-status").textContent.includes("isn't available") && !el("share-panel").hidden);
+        const text = el("share-text").value;
+        assert(text.includes(`${utcDate()} UTC`) && text.includes(`${score} points`) && text.includes(DAILY_RULES) && text.includes(GAME_URL));
+        el("copy-result").click(); await wait();
+        assert(el("share-status").textContent.includes("Select and copy"));
+        set("share", async () => { shares++; throw new win.DOMException("Cancelled", "AbortError"); });
+        set("clipboard", { writeText: async () => copies++ });
+        el("share-result").click(); await wait();
+        assert(el("share-status").textContent.startsWith("Share cancelled") && copies === 0, "Cancellation copied or claimed failure");
+        set("share", async data => { shares++; assert(data.text === text); });
+        el("share-result").click(); await wait();
+        assert(el("share-status").textContent.includes("chosen share destination") && copies === 0);
+        set("share", async () => { shares++; throw new Error("Permission denied"); });
+        el("share-result").click(); await wait();
+        assert(el("share-status").textContent.includes("Couldn't share") && copies === 0);
+        el("copy-result").click(); await wait();
+        assert(copies === 1 && el("share-status").textContent === "Daily result copied.");
+        set("clipboard", { writeText: async () => { throw new Error("Clipboard blocked"); } });
+        el("copy-result").click(); await wait();
+        assert(el("share-status").textContent.includes("Couldn't copy automatically"));
+        el("share-text").dispatchEvent(new win.KeyboardEvent("keydown", { code: "Space", bubbles: true }));
+        assert(!el("run-result").hidden, "Manual copy keyboard action started a run");
+        assert(shares === 3 && el("share-text").value === text);
+      } finally {
+        for (const [key, descriptor] of descriptors) {
+          if (descriptor) Object.defineProperty(win.navigator, key, descriptor);
+          else delete win.navigator[key];
+        }
+      }
+    });
+    await test("Share helpers never copy without a separate action and include comparable rules and stats", async () => {
+      const text = dailyResultText({ date: "2026-10-28", score: 123, distance: 93, bonus: 30, coins: 12, passed: 6, perfects: 3 });
+      assert(text.includes("2026-10-28 UTC") && text.includes("123 points") && text.includes("6 obstacles") && text.includes("3 perfect passes") && text.includes("Fixed Medium") && text.includes(DAILY_RULES));
+      assert((await shareDaily(text, {})).status === "manual");
+      assert((await copyDaily(text, {})).status === "manual");
+      let copies = 0;
+      const platform = { share: async () => { throw { name: "AbortError" }; }, clipboard: { writeText: async () => copies++ } };
+      assert((await shareDaily(text, platform)).status === "cancelled" && copies === 0);
+      platform.share = async () => { throw new Error("Blocked"); };
+      assert((await shareDaily(text, platform)).status === "error" && copies === 0);
+      assert((await copyDaily(text, platform)).status === "copied" && copies === 1);
     });
     await test("Audio failures report explicitly and muted sound stays lazy", async () => {
       let errors = 0;

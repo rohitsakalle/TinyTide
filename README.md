@@ -23,20 +23,57 @@ that speed. Existing obstacles never change shape as they approach.
 Gold coin trails follow safe routes over rocks and under bridges. Collect them
 with the boat for a floating `+1`, a pickup chime and a run count. The **Coin
 bank** saves every pickup immediately, survives retries and is shared across
-paces and courses. Spend them only on cosmetic boats in **Boat studio & missions**:
+paces and courses. Spend them only on cosmetic boats in **Goals, badges & boats**:
 Sunrise paper is free, Mint explorer costs 25 coins, and Berry voyager costs
-50. Each has a preview; owned boats can be reselected for free. Selection is
-locked during runs and pauses. Hull/sail colors change, not physics, collision
+50. Earn Pearl drifter by collecting 50 actual coins, and Solar sailor by making
+10 perfect passes (neither costs coins). Each has a preview; owned boats can be
+reselected for free. Selection is locked during runs and pauses. Hull/sail colors change, not physics, collision
 size, coin collection or scoring. There is no cash value, real-money payment or
 account sync. Records, coins and sound preference are local to this browser.
 
-Existing coin balances migrate into one versioned progress record containing
-bank, owned/selected boats, completed missions and recent daily records. Spending
-and ownership are saved together, as are mission rewards and completion flags.
+Existing coin balances and version-1 saves migrate into version 2 of the same
+`tiny-tide-progress-v1` storage key, preserving bank, owned/selected boats,
+original completed missions and recent daily records. New cumulative metrics
+start at zero: the old bank mixes pickups, rewards and spending, and there is no
+honest way to reconstruct lifetime totals from it. Spending and ownership are
+saved together, as are mission rewards and completion flags.
 A failed purchase save does not spend coins or grant ownership. Storage failures
 show an explicit notice: new rewards last only for that visit and purchases are
 disabled. Invalid saved progress is preserved, not silently overwritten. Earlier
 coin keys are left intact as migration sources, not continuously mirrored.
+
+## Small reasons to return, without pressure
+
+The optional **Goals, badges & boats** panel stays collapsed during gameplay.
+It contains three deterministic daily missions: collect 6/9/12 coins (+5 coins),
+clear 2/3/4 obstacles (+7), and make 1/2 perfect passes (+9), on a six-day UTC
+rotation. Counts accumulate across short runs on either course and any pace.
+Each mission pays **once per UTC date**. An active run freezes its mission date,
+even if UTC midnight passes during a run or pause. Afterward the panel shows the
+new day, while the result explains progress made for the run's original date.
+The next start uses today's date; pausing never advances any counters.
+
+Run receipts track cumulative counters so repeating a frame, retrying or
+reloading cannot replay an already-recorded pickup, mastery event or reward.
+Progress, completion flags and coin payouts are saved together. Daily mission
+ledgers are retained so returning to an earlier device date doesn't repay it;
+the most recent 32 run receipts are retained, and discarded IDs are rejected,
+not silently recreated. This is local/offline bookkeeping, **not anti-cheat**:
+the device clock sets the date, site-data clearing resets local progress, and
+there is no server-authoritative time or cross-device sync. A closed run does
+not resume after reloading, but already-saved progress remains.
+
+Three permanent mastery badges track actual new coin pickups (50), obstacles
+cleared (25) and perfect passes (10). The coin and perfect-pass badges unlock
+the two cosmetic boats above, and the next milestone is visible in the panel.
+Spending coins never reduces mastery; mission rewards never inflate it.
+Previously earned boats and badges never expire. Missing days has no penalty:
+there are no streaks, energy timers, notifications, loot boxes or purchases.
+
+End-of-run summaries compare the score with the **pre-run** best in the relevant
+pace/course, distinguish a first score from an improvement/tie, show actual
+progress toward the next goal, and keep immediate retry available. A zero-score
+attempt isn't labeled a record.
 
 ## Perfect passes, missions and scenery
 
@@ -79,6 +116,18 @@ not a verified leaderboard or anti-cheat system. Skins and missions work on both
 courses without modifying the course. Course and pace stay locked during play
 and pause.
 
+After finishing a Daily run, optionally open **Share this Daily result**.
+Share result uses native Web Share only when explicitly clicked. Unsupported or
+failed sharing offers a separate Copy result action and selectable manual text;
+cancelling a share doesn't copy anything. Clipboard permission errors are
+explained, not reported as success. The result freezes the run's UTC date, score,
+distance, bonus, pickups, clears and perfect passes, plus the game URL, fixed
+Medium profile and **`tide-course-1`** course/physics/scoring rules version.
+Compare only matching dates and versions. Increase `DAILY_RULES` in `sharing.js`
+when competitive rules change. There is no live leaderboard, automatic sharing,
+account lookup or remote score service. Rewards and cosmetics do not alter
+competitive scores or the seeded course.
+
 Gentle synthesized notes accompany launch, tide changes, coin pickups and the
 end of a run. **Sound on / Sound off** mutes all effects and saves your choice.
 Audio is initialized only after a start/resume or sound-button gesture, never
@@ -116,7 +165,7 @@ running the server. The bundled server is for local development, not public host
 
 ## Offline / hosting
 
-Publish `index.html`, `style.css`, `app.js`, `engine.js`, `sound.js`, `progress.js`, `sw.js`,
+Publish `index.html`, `style.css`, `app.js`, `engine.js`, `sound.js`, `progress.js`, `sharing.js`, `sw.js`,
 `manifest.webmanifest`, and `icon.svg` to any HTTPS static host (including GitHub
 Pages). No backend or external assets are needed. Relative URLs work under a
 repository subpath.
@@ -143,8 +192,10 @@ at maximum speed, plus responsive layout, keyboard/pointer input state,
 pause/resume, failure, retry, coin pickups and persistence, best-score migration,
 all three paces and late-run coin-trail reachability, measurable speed/geometry
 ramps, perfect combos, cosmetic spending and failed-save safety, one-time mission
-rewards, daily reproducibility at multiple frame rates, UTC dates and separate
-daily records, scenery, and sound unlock/mute/error flows in an isolated game
+rewards, daily reproducibility at multiple frame rates, UTC rollover and frozen
+mission dates, version-1 migrations, reward idempotency, spending-independent
+mastery, run comparisons, native-share cancel/failure and copy/manual paths,
+separate daily records, scenery, and sound unlock/mute/error flows in an isolated game
 frame. The UI tests restore the prior local data afterward; don't play in another
 tab while the isolated tests run. Sound lifecycle tests use a deterministic Web
 Audio double, plus real Web Audio offline rendering to check non-silent output
@@ -162,7 +213,8 @@ afterward. The test-runner page itself is intentionally not cached.
 
 Endless play with three paces, one fixed-profile daily course, responsive canvas,
 progressive procedural obstacles, collectible coins, cosmetic boat spending,
-perfect combos, three missions, changing scenery, synthesized sound, quick
+perfect combos, original one-time plus rotating daily missions, permanent
+cosmetic mastery, optional Daily result sharing, changing scenery, synthesized sound, quick
 restart, per-pace/daily local bests, pause, and offline core play.
 No ads, real-money purchases, accounts, analytics,
 external fonts, or third-party assets. Best scores belong to this browser, not
@@ -196,6 +248,15 @@ Plan a five-minute session and let each person stop whenever they want.
    sound on/off, device silent mode, and reload persistence of bank, records and
    mute. After Offline ready, switch off network access, reopen the same URL
    and confirm a run, coin pickups and sound still work.
+5. To evaluate the new replay hypotheses, record how many people voluntarily
+   choose another attempt after seeing the run summary, notice the next goal
+   unaided, and choose to share a Daily result. Don't instruct them to retry or
+   share during that observation. Ask whether the goals feel inviting or pushy.
+   With consent, invite a separate next-day check-in: ask whether they returned
+   without a reminder and why, then distinguish **reported voluntary returns**
+   from visits prompted by that check-in. Record denominators and missing
+   responses, not fabricated retention rates. Compare with an earlier release
+   or a small counterbalanced playtest only if the sample supports it.
 
 Use a simple sheet with: participant code, device/browser/version, chosen pace,
 unaided understanding, failures understood, voluntary retries, unfair moments,
@@ -208,7 +269,7 @@ the next change; do not treat any results as collected until real sessions occur
 
 ### Sharing the prototype
 
-The static release consists only of the nine files listed in Offline / hosting.
+The static release consists only of the ten files listed in Offline / hosting.
 Serve them from a single HTTPS directory; no build, dependencies or credentials.
 Do not send `file:` URLs or the local development server as a public service.
 The approved GitHub Pages preview uses the repository root of
@@ -222,3 +283,33 @@ Safari, verify Offline ready, and ensure the preview is the intended version.
 Further publishing changes should remain owner-approved. Real devices and
 access to consenting target players are needed to complete this milestone;
 desktop responsive checks are not a substitute.
+
+## Research behind the replay hypotheses
+
+The source listings show patterns that already exist in other games; they do
+**not** establish that a feature causes retention or that Tiny Tide will retain
+players or make revenue:
+
+- [NYT Games](https://apps.apple.com/us/app/nyt-games-wordle-crossword/id307569751)
+  documents daily puzzles, statistics, badges and friend-score comparisons;
+  [Wordle](https://www.nytimes.com/games/wordle/index.html) offers a new daily
+  puzzle. Adaptation: a shared date/course, a clear score comparison and optional
+  result text, not a fake leaderboard or a punitive streak.
+- [Crossy Road](https://play.google.com/store/apps/details?id=com.yodo1.crossyroad)
+  documents character collection, daily quests/challenges, worlds and character
+  stats. Adaptation: three short daily goals and a tiny permanent cosmetic
+  collection using the existing boats and coins.
+- [Subway Surfers](https://play.google.com/store/apps/details?id=com.kiloo.subwaysurf)
+  documents themed worlds, crew/board collection and challenges/rewards.
+  Adaptation: readable scenery, earned cosmetics and goals without intrusive
+  ads or growing menus. Individual store complaints about complexity, ads or
+  lost saves are anecdotes, not representative evidence.
+- [Vampire Survivors](https://apps.apple.com/us/app/vampire-survivors/id6444525702)
+  documents minimal controls alongside lasting gold progression and varied builds.
+  Adaptation: preserve one-control play and durable cosmetic mastery; do not
+  add random power-ups, upgrades or builds that change competitive Daily scores.
+
+These are **testable retention hypotheses**, not a promise of "addictiveness".
+Automated checks prove only the specified software behavior. Real voluntary
+replay, next-day returns, clarity, enjoyment and perceived fairness require the
+human study above. No player or retention results have been collected here.

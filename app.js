@@ -1,6 +1,7 @@
 import { TideGame, RULES, MODES, minimumViewWidth, waterY, sceneryState } from "./engine.js";
 import { TideSound } from "./sound.js";
-import { ProgressStore, SKINS, MISSIONS, utcDate, dailyRandom } from "./progress.js";
+import { ProgressStore, SKINS, MISSIONS, MASTERY, utcDate, dailyRandom, dailyMissions, bestComparison } from "./progress.js";
+import { DAILY_RULES, dailyResultText, shareDaily, copyDaily } from "./sharing.js";
 
 const $ = id => document.getElementById(id);
 const canvas = $("game");
@@ -14,6 +15,11 @@ let visualTime = 0;
 let best = 0;
 let runDate = null;
 let runCourse = "endless";
+let goalDate = utcDate();
+let runId = null;
+let runBest = 0;
+let lastResult = null;
+let shownGoalDate = null;
 const bests = { easy: 0, medium: 0, fast: 0 };
 let muted = false;
 let sparkles = [];
@@ -132,9 +138,10 @@ function renderProgress() {
   $("coin-bank").textContent = String(coinBank());
   for (const [id, button] of skinButtons) {
     const owned = progress.data.owned.includes(id);
-    button.textContent = progress.data.selected === id ? "Selected" : owned ? "Select" : `Unlock · ${SKINS[id].price} coins`;
+    const badge = MASTERY.find(item => item.id === SKINS[id].mastery);
+    button.textContent = progress.data.selected === id ? "Selected" : owned ? "Select" : badge ? `Earn: ${badge.target} ${badge.detail}` : `Unlock · ${SKINS[id].price} coins`;
     button.setAttribute("aria-label", `${SKINS[id].name}: ${button.textContent}`);
-    button.disabled = !progress.persistent || (state !== "ready" && state !== "over") || progress.data.selected === id || (!owned && coinBank() < SKINS[id].price);
+    button.disabled = !progress.persistent || (state !== "ready" && state !== "over") || progress.data.selected === id || (!owned && (Boolean(badge) || coinBank() < SKINS[id].price));
   }
   $("missions").replaceChildren(...MISSIONS.map(mission => {
     const item = document.createElement("li");
@@ -142,8 +149,28 @@ function renderProgress() {
     item.textContent = `${mission.label}: ${completed ? "Complete" : `${Math.min(mission.target, game[mission.metric])}/${mission.target}`} · ${mission.reward} coins${completed ? " paid" : " reward"}`;
     return item;
   }));
-  const next = MISSIONS.find(mission => !progress.data.completed.includes(mission.id));
-  $("mission-summary").textContent = next ? `${next.label} · ${Math.min(next.target, game[next.metric])}/${next.target}` : "All missions complete!";
+  const date = state === "running" || state === "paused" ? goalDate : utcDate();
+  shownGoalDate = date;
+  const daily = progress.data.dailyGoals[date];
+  const dailyGoals = dailyMissions(date);
+  $("daily-missions-date").textContent = `${date} UTC${state === "running" || state === "paused" ? " · frozen for this run" : ""}`;
+  $("daily-missions").replaceChildren(...dailyGoals.map(mission => {
+    const item = document.createElement("li");
+    const claimed = daily?.claimed.includes(mission.id);
+    item.textContent = `${mission.label}: ${claimed ? "Complete" : `${daily?.[mission.metric] || 0}/${mission.target}`} · ${mission.reward} coins${claimed ? " paid" : " reward"}`;
+    return item;
+  }));
+  $("mastery").replaceChildren(...MASTERY.map(badge => {
+    const item = document.createElement("li");
+    const total = progress.data.totals[badge.metric];
+    item.textContent = `${badge.label}: ${Math.min(total, badge.target)}/${badge.target} ${badge.detail}${total >= badge.target ? " · badge earned" : ""}${badge.skin ? ` · ${SKINS[badge.skin].name} ${total >= badge.target ? "unlocked" : "unlock"}` : ""}`;
+    return item;
+  }));
+  const next = dailyGoals.find(mission => !daily?.claimed.includes(mission.id));
+  const badge = MASTERY.find(item => progress.data.totals[item.metric] < item.target);
+  $("mission-summary").textContent = next ? `Today's ${next.label.toLowerCase()} · ${daily?.[next.metric] || 0}/${next.target}`
+    : badge ? `Next: ${badge.label} · ${progress.data.totals[badge.metric]}/${badge.target}` : "Today's goals and mastery complete. Float for fun!";
+  $("mastery-next").textContent = badge ? `Next badge: ${badge.label} · ${progress.data.totals[badge.metric]}/${badge.target} ${badge.detail}` : "All three badges earned. Your boats stay yours.";
 }
 $("studio").addEventListener("toggle", () => { if ($("studio").open) pause(); });
 renderProgress();
@@ -183,11 +210,19 @@ function clearInput() {
 
 function start() {
   sound.stop();
+  goalDate = utcDate();
+  runId = progress.beginRun(goalDate);
   runCourse = $("course").value;
-  runDate = runCourse === "daily" ? utcDate() : null;
+  runDate = runCourse === "daily" ? goalDate : null;
   game.random = runDate ? dailyRandom(runDate) : Math.random;
   game.reset(runDate ? "medium" : $("mode").value);
   best = runDate ? progress.data.dailyBests[runDate] || 0 : bests[game.mode];
+  runBest = best;
+  lastResult = null;
+  $("run-result").hidden = true;
+  $("share-panel").hidden = true;
+  $("share-status").textContent = "";
+  $("share-text").value = "";
   $("best").textContent = `${best} pts`;
   $("mode").disabled = true;
   $("course").disabled = true;
@@ -260,7 +295,7 @@ function finish() {
   $("mode").disabled = runCourse === "daily";
   $("course").disabled = false;
   $("tide").disabled = true;
-  const record = game.score > best;
+  const record = game.score > runBest;
   if (record) {
     best = game.score;
     $("best").textContent = `${best} pts`;
@@ -272,10 +307,42 @@ function finish() {
     }
   }
   const reason = game.failure === "rock" ? "A little too low. Hold earlier to clear the rocks." : "A little too high. Release earlier for the bridge.";
-  showOverlay(record ? `A NEW ${runDate ? "DAILY" : MODES[game.mode].label.toUpperCase()} BEST` : "EVERY TIDE TEACHES YOU", `${game.score} flow points.`, reason, "Float again →", `${Math.floor(game.distance / 10)} m · ${game.bonus} bonus points · ${game.collected} coins · Space to retry`);
-  $("announcement").textContent = `${game.score} points. ${reason}`;
+  showOverlay(record && runBest > 0 ? `A NEW ${runDate ? "DAILY" : MODES[game.mode].label.toUpperCase()} BEST` : "EVERY TIDE TEACHES YOU", `${game.score} flow points.`, reason, "Float again →", `${Math.floor(game.distance / 10)} m · ${game.bonus} bonus points · ${game.collected} coins · Space to retry`);
+  lastResult = Object.freeze({ date: runDate, score: game.score, distance: Math.floor(game.distance / 10), bonus: game.bonus, coins: game.collected, passed: game.passed, perfects: game.perfects });
+  $("result-comparison").textContent = `${runDate ? `${runDate} UTC Daily · ${DAILY_RULES}` : `${MODES[game.mode].label} Endless`}: ${bestComparison(game.score, runBest)}`;
+  $("result-goal").textContent = nextGoalText(goalDate);
+  $("run-result").hidden = false;
+  $("share-options").hidden = !runDate;
+  $("announcement").textContent = `${game.score} points. ${reason} ${$("result-comparison").textContent} ${$("result-goal").textContent}`;
   renderProgress();
 }
+
+function nextGoalText(date) {
+  const daily = progress.data.dailyGoals[date];
+  const next = dailyMissions(date).find(mission => !daily?.claimed.includes(mission.id));
+  if (next) return `${date} UTC goal: ${next.label} · ${daily?.[next.metric] || 0}/${next.target} toward ${next.reward} coins. Counts across runs.`;
+  const badge = MASTERY.find(item => progress.data.totals[item.metric] < item.target);
+  return badge ? `Next mastery: ${badge.label} · ${progress.data.totals[badge.metric]}/${badge.target} ${badge.detail}.`
+    : "Daily goals and all mastery complete. Your earned boats are permanent.";
+}
+
+for (const [id, action] of [["share-result", shareDaily], ["copy-result", copyDaily]]) {
+  $(id).addEventListener("click", async () => {
+    if (!lastResult?.date) return;
+    const result = lastResult;
+    const text = dailyResultText(result);
+    $("share-text").value = text;
+    $("share-panel").hidden = false;
+    $("share-result").disabled = true;
+    $("copy-result").disabled = true;
+    const response = await action(text);
+    $("share-result").disabled = false;
+    $("copy-result").disabled = false;
+    if (response.error) console.warn("Tiny Tide Daily result action failed:", response.error);
+    if (lastResult === result) $("share-status").textContent = response.message;
+  });
+}
+$("share-text").addEventListener("focus", () => $("share-text").select());
 
 $("play").addEventListener("click", () => state === "paused" ? resume() : start());
 $("pause").addEventListener("click", () => state === "paused" ? resume() : pause());
@@ -293,7 +360,7 @@ for (const element of [canvas, $("tide")]) {
   element.addEventListener("contextmenu", event => event.preventDefault());
 }
 window.addEventListener("keydown", event => {
-  if (event.target instanceof HTMLSelectElement || (event.target instanceof Element && event.target.closest("#studio"))) return;
+  if (event.target instanceof HTMLSelectElement || (event.target instanceof Element && event.target.closest("#studio, #run-result"))) return;
   if (event.code === "KeyP" || event.code === "Escape") {
     if (event.repeat) return;
     event.preventDefault();
@@ -493,10 +560,16 @@ function frame(time) {
     }
     sparkles = sparkles.filter(sparkle => (sparkle.life -= dt) > 0);
     if (game.pickups.length || game.passEvents.length) {
-      const earned = progress.recordRun(game, game.pickups.length);
-      if (earned.length) {
-        $("mission-feedback").textContent = earned.map(mission => `${mission.label} complete! +${mission.reward} coins.`).join(" ");
-        $("announcement").textContent = $("mission-feedback").textContent;
+      try {
+        const earned = progress.recordRun(game, runId);
+        if (earned.length) {
+          $("mission-feedback").textContent = earned.map(mission => `${mission.label}${mission.reward ? ` complete! +${mission.reward} coins.` : "."}`).join(" ");
+          $("announcement").textContent = $("mission-feedback").textContent;
+        }
+      } catch (error) {
+        pause();
+        $("notice").textContent = `Couldn't record this run: ${error.message}`;
+        console.warn("Tiny Tide run progress failed:", error);
       }
       renderProgress();
     }
@@ -521,6 +594,10 @@ function frame(time) {
     $("next").textContent = next ? `${next.type === "rock" ? "↑ Hold · rock" : "↓ Release · bridge"}${next.x - game.distance > width ? " ahead" : ""}` : "Find your flow";
     $("tide").classList.toggle("active", holding());
     if (game.failure) finish();
+  }
+  if (state !== "running" && state !== "paused" && shownGoalDate !== utcDate()) {
+    updateBestPreview();
+    renderProgress();
   }
   draw();
   requestAnimationFrame(frame);

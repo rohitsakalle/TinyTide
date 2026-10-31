@@ -20,7 +20,7 @@
       <div class="game-top">
         <div class="score-group"><span class="eyebrow">SCORE</span><strong><span id="score">0</span><small>pts</small></strong></div>
         <div id="next" class="next">Find your flow</div>
-        <div class="game-actions"><div class="best"><span class="eyebrow">PERSONAL BEST</span><strong id="best">0 m</strong></div><button id="sound" class="sound-button" aria-label="Mute sound" aria-pressed="false">Sound on</button><button id="pause" class="icon-button" aria-label="Pause game" disabled>Ⅱ</button></div>
+        <div class="game-actions"><div class="best"><span class="eyebrow">PERSONAL BEST</span><strong id="best">0 pts</strong></div><button id="sound" class="sound-button" aria-label="Mute sound" aria-pressed="false">Sound on</button><button id="pause" class="icon-button" aria-label="Pause game" disabled>Ⅱ</button></div>
       </div>
       <div class="coin-bar">
         <label class="mode-label" for="course">Course <select id="course"><option value="endless">Endless</option><option value="daily">Daily</option></select></label>
@@ -48,13 +48,39 @@
         <div class="control-tip"><span class="key">↓</span><span><b>Release</b> for low bridges</span></div>
       </div>
     </section>
+    <section id="run-result" class="studio" aria-label="Last run summary" hidden>
+      <h2>Your little voyage</h2>
+      <p id="result-comparison"></p>
+      <p id="result-goal"></p>
+      <details id="share-options" hidden>
+        <summary>Share this Daily result (optional)</summary>
+        <p>Compare the same UTC date and rules version. No account or leaderboard.</p>
+        <button id="share-result" class="sound-button">Share result</button>
+        <button id="copy-result" class="sound-button">Copy result</button>
+        <p id="share-status" role="status" aria-live="polite"></p>
+        <div id="share-panel" hidden>
+          <label for="share-text">Result text — select to copy manually</label>
+          <textarea id="share-text" rows="6" readonly></textarea>
+        </div>
+      </details>
+    </section>
     <details class="studio" id="studio">
-      <summary>Boat studio &amp; missions <span id="mission-summary">Three little goals</span></summary>
+      <summary>Goals, badges &amp; boats <span id="mission-summary">Three little daily goals</span></summary>
+      <h2>Today's missions</h2>
+      <p id="daily-missions-date"></p>
+      <p>Counts across short runs on either course. Three goals, paid once per UTC day. No streaks, no penalty for missing days.</p>
+      <ul id="daily-missions"></ul>
+      <p>The device clock sets the date, also offline. An active run keeps its starting mission date until it ends.</p>
+      <h2>Permanent mastery</h2>
+      <p id="mastery-next"></p>
+      <ul id="mastery"></ul>
+      <p>Totals start with this update: earlier bank balances include rewards and spending, not known lifetime pickups. Only actual new pickups, obstacle clears and perfect passes count. Rewards and spending never inflate or reduce mastery.</p>
+      <h2>Boat collection</h2>
       <p>Cosmetics only. Spend collected coins, never real money. Choose a boat between runs.</p>
       <p>Perfect passes: the gold bracket marks your target waterline as you exit a rock or bridge. Close, safe exits build a combo for 5–25 bonus points per pass. Missing the band is safe, but resets the combo.</p>
       <div id="skins" class="skins"></div>
       <p id="shop-feedback" role="status"></p>
-      <h2>One-time missions</h2>
+      <h2>Original one-time missions</h2>
       <p>Complete each goal in a single run, on either course. Each reward is paid only once.</p>
       <ul id="missions"></ul>
       <p id="mission-feedback" role="status" aria-live="polite"></p>

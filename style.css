@@ -36,7 +36,9 @@ small { font-size: 14px; margin-left: 4px; color: #789087; }
 .skin-card { flex: 1 1 150px; border: 1px solid #d7dfd1; border-radius: 14px; padding: 14px; text-align: center; }
 .skin-preview { display: block; width: 65px; height: 45px; margin: 0 auto 8px; }
 .skin-card button { min-height: 44px; margin-top: 8px; border: 1px solid #b8cdb9; border-radius: 20px; padding: 8px 14px; background: #e8eee1; color: #235a50; }
-#missions { padding-left: 20px; line-height: 2; }
+#missions, #daily-missions, #mastery { padding-left: 20px; line-height: 2; }
+#share-text { display: block; width: 100%; margin-top: 8px; padding: 10px; font: inherit; line-height: 1.6; color: #204443; background: #f5f3e9; border: 1px solid #b8cdb9; border-radius: 8px; resize: vertical; }
+#share-text:focus-visible { outline: 3px solid #d27b43; outline-offset: 2px; }
 .coin-bar b { color: #795722; font-variant-numeric: tabular-nums; }
 .coin-totals { display: inline-flex; gap: 10px; align-items: center; white-space: nowrap; }
 .coin-symbol { color: #c89430; }
