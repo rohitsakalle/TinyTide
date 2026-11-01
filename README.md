@@ -48,7 +48,7 @@ reselected for free. Selection is locked during runs and pauses. Hull/sail color
 size, coin collection or scoring. There is no cash value, real-money payment or
 account sync. Records, coins and sound preference are local to this browser.
 
-Existing coin balances and earlier saves migrate into version 5 of the same
+Existing coin balances and earlier saves migrate into version 6 of the same
 `tiny-tide-progress-v1` storage key, preserving bank, owned/selected boats,
 original completed missions and recent daily records. New cumulative metrics
 start at zero: the old bank mixes pickups, rewards and spending, and there is no
@@ -140,7 +140,7 @@ failed sharing offers a separate Copy result action and selectable manual text;
 cancelling a share doesn't copy anything. Clipboard permission errors are
 explained, not reported as success. The result freezes the run's UTC date, score,
 distance, bonus, pickups, clears and perfect passes, plus the game URL, fixed
-Medium profile and **`tide-gifts-4`** course/physics/scoring rules version.
+Medium profile and **`tide-super-5`** course/physics/scoring rules version.
 Boost changes possible score pace, so prior daily bests are retained separately
 in `legacyDailyBests` (pre-boost) and `archivedBoostDailyBests` (earlier boost rules)
 and never compared as if they used the same rules. Existing
@@ -207,23 +207,27 @@ packaging are outside this milestone. For future releases, bump the cache
 version in `sw.js` whenever changing cached assets.
 The cache is isolated by service-worker scope so repository-subpath deployments
 do not replace caches belonging to other Tiny Tide previews on the same origin.
-**Build T11** is visible in the local footer. Navigations try the network first, with
+**Build T12** is visible in the local footer. Navigations try the network first, with
 the cached shell as an offline fallback. When a new worker replaces an existing
 controller, an idle page reloads once; an active/paused/crashing run is not
 interrupted. An explicit update button is shown and the automatic reload waits
 until the run ends. A page still executing older code may need one manual
 online reload before this behavior is available.
 
-## Surprise boxes (local T11 update)
+## Pickups (local T12 update)
 
-Purple ribbon boxes marked `?` appear occasionally along safe coin routes.
-Collecting one reveals **Booster pack** (6 seconds of automatic 1.60x boost),
-**Slow-motion** (6 seconds at 0.60x normal pace), **Autopilot** (8 seconds of
-automatic tide control), or **+10 coins** immediately saved to the bank.
+Colored pickups display their contents before collection: an orange rocket for
+**Booster pack** (6 seconds of automatic 1.60x boost), a purple compass for
+**Autopilot** (8 seconds of automatic tide control), or a gold coin with **+10**
+immediately saved to the bank. The same icons appear in the status strip.
+Booster has half the pickup slots; Autopilot and coins each have one quarter.
+There is no Slow-motion pickup.
 The status strip shows the revealed icon, color and remaining active time, with
 a synthesized pickup sound that respects mute. Timed gifts replace the current
-timed effect, never multiply or stack; +10 coins does not interrupt it.
-Slow-motion takes priority over manually held boost. Pausing freezes timers;
+timed effect; +10 coins does not interrupt it. Holding Right Arrow or the phone
+boost button during a Booster pack smoothly ramps to **SUPER BOOST 2.20x**,
+regardless of which boost started first. Release or expiry smoothly returns to
+the remaining single boost (1.60x) or base pace. Pausing freezes timers;
 crashing/restarting clears temporary effects. Gift coins have a separate run
 receipt, so retry/reload cannot repay them and they never count as actual
 pickups toward mastery or coin missions.
@@ -231,17 +235,21 @@ pickups toward mastery or coin missions.
 Autopilot warns during its final two seconds, finishes any current obstacle
 passage, then gives control back with two seconds of gentle 0.60x pace.
 Prepare to hold/release the tide when the status says **Take control now**.
+Manual boost remains available during Autopilot; it replaces Booster rather
+than stacking with it. The gentle handoff temporarily overrides boost for safety.
 No shield, magnet, energy meter, purchases or additional effect systems are added.
 Boxes and their revealed effects come from course generation, not player timing:
 Daily courses use identical seeds, placements and effects across frame rates
-and boost inputs. Comparisons use `tide-gifts-4`; T10 Daily scores are archived
-separately in `archivedT10DailyBests`, with older records/inventory also retained.
-Save schema is now version 5. New Endless bests use the new rules key.
+and boost inputs. Warnings and hazard gaps budget the full 2.20x combined speed.
+Comparisons use `tide-super-5`; T11 Daily scores are archived separately in
+`archivedT11DailyBests`, with older records/inventory also retained.
+Save schema is now version 6. New Endless bests use the new rules key.
 
 Manual boost and Booster pack draw a bright outlined jet, inner glow, foam
 streaks and spray behind the boat; the trail fades with the existing boost ramp.
+Super boost lengthens the jet and adds foam/spray.
 Reduced-motion uses a steady shorter jet and calm foam rather than moving spray.
-This update displays **Build T11** and uses offline cache v11. It is not on the
+This update displays **Build T12** and uses offline cache v12. It is not on the
 public Pages site until separately approved for publication.
 
 ## Checks

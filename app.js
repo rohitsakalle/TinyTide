@@ -14,8 +14,8 @@ const startedControlled = Boolean(navigator.serviceWorker?.controller);
 function applyUpdateWhenSafe() {
   if (!updateReady || ["running", "paused", "crashing"].includes(state)) return;
   try {
-    if (sessionStorage.getItem("tiny-tide-reloaded-build") === "T11") return;
-    sessionStorage.setItem("tiny-tide-reloaded-build", "T11");
+    if (sessionStorage.getItem("tiny-tide-reloaded-build") === "T12") return;
+    sessionStorage.setItem("tiny-tide-reloaded-build", "T12");
   } catch (error) {
     console.warn("Tiny Tide could not guard an automatic update reload:", error);
     $("update-game").hidden = false;
@@ -66,7 +66,7 @@ try {
     const stored = localStorage.getItem(bestKey(mode));
     const value = Number(stored);
     bests[mode] = stored !== null && Number.isSafeInteger(value) && value >= 0 ? value : 0;
-    const old = Number(localStorage.getItem(`tiny-tide-best-tide-boost-3-${mode}`) || localStorage.getItem(`tiny-tide-best-tide-boost-2-${mode}`) || localStorage.getItem(`tiny-tide-best-${mode}`) || (mode === "medium" ? localStorage.getItem("tiny-tide-best") : 0));
+    const old = Number(localStorage.getItem(`tiny-tide-best-tide-gifts-4-${mode}`) || localStorage.getItem(`tiny-tide-best-tide-boost-3-${mode}`) || localStorage.getItem(`tiny-tide-best-tide-boost-2-${mode}`) || localStorage.getItem(`tiny-tide-best-${mode}`) || (mode === "medium" ? localStorage.getItem("tiny-tide-best") : 0));
     previousBests[mode] = Number.isSafeInteger(old) && old > 0 ? old : 0;
   }
   best = bests.medium;
@@ -113,7 +113,7 @@ function updateBestPreview() {
   const daily = $("course").value === "daily";
   best = daily ? progress.data.dailyBests[utcDate()] || 0 : bests[$("mode").value];
   $("best").textContent = `${best} pts`;
-  const legacyDaily = progress.data.archivedT10DailyBests[utcDate()] || progress.data.archivedBoostDailyBests[utcDate()] || progress.data.legacyDailyBests[utcDate()];
+  const legacyDaily = progress.data.archivedT11DailyBests[utcDate()] || progress.data.archivedT10DailyBests[utcDate()] || progress.data.archivedBoostDailyBests[utcDate()] || progress.data.legacyDailyBests[utcDate()];
   const previous = daily ? legacyDaily : previousBests[$("mode").value];
   $("previous-best").hidden = !previous;
   $("previous-best").textContent = previous ? `Previous rules: ${previous} pts · archived, not compared` : "";
@@ -238,6 +238,9 @@ new ResizeObserver(resize).observe(canvas);
 
 function clearInput() {
   game.boostAmount = 0;
+  game.manualBoost = 0;
+  game.packBoost = 0;
+  game.superAmount = 0;
   tidePointers.clear();
   boostPointers.clear();
   tideKeys.clear();
@@ -715,13 +718,22 @@ function draw() {
   for (const gift of game.gifts) {
     const x = gift.x - scroll;
     if (x < -25 || x > width + 25) continue;
-    rounded(x - 17, gift.y - 17, 34, 34, 5, "#b095dc");
+    const info = GIFTS[gift.effect];
+    ctx.save();
+    ctx.translate(x, gift.y);
+    // Keep pickup badges square and readable in tall, narrow playfields.
+    const transform = ctx.getTransform();
+    ctx.scale(transform.d / transform.a, 1);
+    rounded(-17, -17, 34, 34, 5, info.color);
     ctx.strokeStyle = "#49325d"; ctx.lineWidth = 3;
-    ctx.strokeRect(x - 17, gift.y - 17, 34, 34);
-    rounded(x - 3, gift.y - 17, 6, 34, 1, "#fff2a9");
-    rounded(x - 17, gift.y - 3, 34, 6, 1, "#fff2a9");
-    ctx.fillStyle = "#49325d"; ctx.font = "bold 18px system-ui"; ctx.textAlign = "center";
-    ctx.fillText("?", x, gift.y - 20);
+    ctx.strokeRect(-17, -17, 34, 34);
+    ctx.fillStyle = "#49325d"; ctx.font = "bold 24px system-ui"; ctx.textAlign = "center";
+    ctx.fillText(info.icon, 0, 8);
+    if (gift.effect === "coins") {
+      ctx.font = "bold 12px system-ui";
+      ctx.fillText("+10", 0, -21);
+    }
+    ctx.restore();
   }
   for (const sparkle of sparkles) {
     const progress = 1 - sparkle.life / .7;
@@ -755,12 +767,12 @@ function draw() {
   if (state === "running" && game.boostAmount > .01 && game.speed > game.baseSpeed) {
     ctx.save();
     ctx.globalAlpha = game.boostAmount;
-    const length = 30 + game.boostAmount * (reducedMotion ? 25 : 55);
+    const length = 30 + game.boostAmount * (reducedMotion ? 25 : 55) + game.superAmount * (reducedMotion ? 15 : 35);
     const flicker = reducedMotion ? 0 : Math.sin(visualTime * 30) * 5;
     path([[RULES.boatX - 26, y + 3], [RULES.boatX - 26 - length - flicker, y + 8], [RULES.boatX - 26, y + 12]], "#ffae43", "#98501e");
     path([[RULES.boatX - 27, y + 5], [RULES.boatX - 27 - length * .65, y + 8], [RULES.boatX - 27, y + 10]], "#fff3ab");
     ctx.strokeStyle = "#f4fff0"; ctx.lineWidth = 3;
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < (game.superAmount > .5 ? 5 : 3); i++) {
       const offset = reducedMotion ? 0 : (visualTime * 100 + i * 15) % 24;
       ctx.beginPath();
       ctx.moveTo(RULES.boatX - 35 - offset, y + 17 + i * 7);
@@ -780,7 +792,7 @@ function frame(time) {
   if (state === "running") {
     visualTime += dt;
     game.update(dt, holding(), boosting());
-    const boostLabel = game.boostAmount > 0 ? ` · BOOST ${(game.speed / game.baseSpeed).toFixed(2)}×` : "";
+    const boostLabel = game.speed > game.baseSpeed ? ` · ${game.superAmount > .01 ? "SUPER BOOST" : "BOOST"} ${(game.speed / game.baseSpeed).toFixed(2)}×` : "";
     $("flow").textContent = `Flow ${Math.round(game.progression * 100)}% · ${(game.baseSpeed / game.difficulty.startSpeed).toFixed(2)}×${boostLabel}`;
     if (holding() !== wasHolding) {
       if (visualTime - lastTideSound > .25) {
@@ -838,7 +850,7 @@ function frame(time) {
     } else if (feedback) {
       const info = GIFTS[feedback.type];
       giftStatus.style.borderColor = info.color;
-      giftStatus.textContent = feedback.type === "coins" ? "+10 coins saved to bank" : `${info.icon} ${info.label} ended`;
+      giftStatus.textContent = feedback.type === "coins" ? `${info.icon} +10 coins saved to bank` : `${info.icon} ${info.label} ended`;
     }
     for (const pass of game.passEvents) {
       $("combo").textContent = pass.perfect

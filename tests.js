@@ -82,7 +82,7 @@ export function runTests() {
     close.lift = 1;
     for (let tick = 0; tick < 32; tick++) close.update(1 / 120, true, true);
     assert(close.speed > close.baseSpeed * 1.59 && !close.failure, "Boost was cancelled near a safely cleared hazard");
-    assert(minimumViewWidth("fast") - RULES.boatX - RULES.boatHalfWidth >= MODES.fast.maxSpeed * RULES.boostFactor * (1 / RULES.tideRate + .5) - 1e-9);
+    assert(minimumViewWidth("fast") - RULES.boatX - RULES.boatHalfWidth >= MODES.fast.maxSpeed * RULES.maxBoostFactor * (1 / RULES.tideRate + .5) - 1e-9);
     for (const mode of Object.keys(MODES)) {
       const plain = new TideGame(seeded(81), mode);
       const fast = new TideGame(seeded(81), mode);
@@ -118,7 +118,7 @@ export function runTests() {
   test("Smallest viewport gives a full transition plus 0.5s warning", () => {
     for (const mode of Object.keys(MODES)) {
       const lead = minimumViewWidth(mode) - RULES.boatX - RULES.boatHalfWidth;
-      assert(lead / (MODES[mode].maxSpeed * RULES.boostFactor) >= 1 / RULES.tideRate + .5);
+      assert(lead / (MODES[mode].maxSpeed * RULES.maxBoostFactor) >= 1 / RULES.tideRate + .5);
     }
   });
   test("All modes ramp smoothly to a bounded cap over 90 active seconds and reset", () => {
@@ -166,8 +166,8 @@ export function runTests() {
       late.spawnCount = 24;
       opening.lastType = late.lastType = "rock";
       assert(opening.spawn(4000).type === "rock" && late.spawn(4000).type === "bridge");
-      const transitionBudget = (late.obstacleGap - 2 * RULES.boatHalfWidth - 90) / (MODES[mode].maxSpeed * RULES.boostFactor);
-      assert(transitionBudget >= 1 / RULES.tideRate + .25);
+      const transitionBudget = (late.obstacleGap - 2 * RULES.boatHalfWidth - 90) / (MODES[mode].maxSpeed * RULES.maxBoostFactor);
+      assert(transitionBudget + 1e-9 >= 1 / RULES.tideRate + .25);
     }
   });
   test("Perfect exits earn consecutive capped bonuses; safe non-perfect exits break the combo", () => {
@@ -249,11 +249,12 @@ export function runTests() {
     }
     assert(JSON.stringify(game) === original);
   });
-  test("Seeded surprise placement and reveal stay identical across boost and frame timing", () => {
+  test("Seeded pickup placement and types stay identical across single/super boost and frame timing", () => {
     function course(fps, boost) {
       const game = new TideGame(dailyRandom("2026-11-01"));
       const gifts = new Map();
       for (let frame = 0; frame < fps * 100; frame++) {
+        game.effect = { type: "booster", remaining: 6 };
         for (const gift of game.gifts) gifts.set(gift.x, { x: gift.x, y: gift.y, effect: gift.effect });
         game.update(1 / fps, game.next?.type === "rock", boost);
         assert(!game.failure, "Surprise course became unavoidable");
@@ -267,7 +268,7 @@ export function runTests() {
       assert(JSON.stringify(first[i]) === JSON.stringify(second[i]), "Input/timing changed a gift reveal");
     }
   });
-  test("Four gifts reveal once, replace timed effects, stay bounded, and reset on crash/retry", () => {
+  test("Three pickups reveal once, replace timed effects, stay bounded, and reset on crash/retry", () => {
     for (const type of Object.keys(GIFTS)) {
       const game = new TideGame(seeded(5));
       game.gifts = [{ x: RULES.boatX + 1, y: waterY(game.lift) - 18, effect: type }];
@@ -279,8 +280,7 @@ export function runTests() {
       assert(game.giftEvents.length === 0 && game.effect?.remaining === remaining);
       if (type !== "coins") {
         for (let tick = 0; tick < 50; tick++) game.update(1 / 120, game.next?.type === "rock", true);
-        assert(game.speed <= MODES.medium.maxSpeed * RULES.boostFactor);
-        if (type === "slow") assert(Math.abs(game.speed / game.baseSpeed - .6) < 1e-9);
+        assert(game.speed <= MODES.medium.maxSpeed * RULES.maxBoostFactor);
         game.gifts = [{ x: game.distance + RULES.boatX, y: waterY(game.lift) - 18, effect: "booster" }];
         game.update(1 / 120, true);
         assert(game.effect.type === "booster" && game.effect.remaining > 5.98, `${type}: replacement timer ${game.effect.remaining}`);
@@ -288,6 +288,46 @@ export function runTests() {
       game.failure = "rock";
       game.reset();
       assert(!game.effect && game.handoff === 0 && game.giftCoins === 0);
+    }
+  });
+  test("Pickup slots and icons identify three outcomes with double Booster probability", () => {
+    assert(!Object.hasOwn(GIFTS, "slow") && Object.keys(GIFTS).length === 3);
+    assert(GIFTS.booster.icon === "🚀" && GIFTS.autopilot.icon === "🧭" && GIFTS.coins.icon === "🪙");
+    const outcomes = [];
+    for (const value of [.01, .26, .51, .76]) {
+      const game = new TideGame(() => value);
+      game.spawn(3000);
+      outcomes.push(game.gifts[0].effect);
+    }
+    assert(JSON.stringify(outcomes) === JSON.stringify(["booster", "booster", "autopilot", "coins"]));
+  });
+  test("Super boost stacks in either order and ramps through release, expiry, pause and crash", () => {
+    for (const manualFirst of [true, false]) {
+      const game = new TideGame(seeded(8));
+      game.obstacles = [{ type: "rock", x: 100000, width: 80, edge: 300, passed: false }];
+      game.gifts = [];
+      for (let i = 0; i < 40; i++) game.update(1 / 120, true, manualFirst);
+      game.effect = { type: "booster", remaining: 6 };
+      for (let i = 0; i < 40; i++) game.update(1 / 120, true, true);
+      assert(Math.abs(game.speed / game.baseSpeed - 2.2) < 1e-9);
+      const remaining = game.effect.remaining, speed = game.speed;
+      game.update(0, true, false);
+      assert(game.speed === speed && game.effect.remaining === remaining);
+      game.update(1 / 120, true, false);
+      assert(game.speed / game.baseSpeed > 1.6 && game.speed / game.baseSpeed < 2.2);
+      for (let i = 0; i < 30; i++) game.update(1 / 120, true, false);
+      assert(Math.abs(game.speed / game.baseSpeed - 1.6) < 1e-9);
+      for (let i = 0; i < 40; i++) game.update(1 / 120, true, true);
+      game.effect.remaining = 1 / 120;
+      game.update(1 / 120, true, true);
+      assert(!game.effect && game.speed / game.baseSpeed > 1.6);
+      for (let i = 0; i < 30; i++) game.update(1 / 120, true, true);
+      assert(Math.abs(game.speed / game.baseSpeed - 1.6) < 1e-9);
+      game.obstacles = [{ type: "rock", x: game.distance + RULES.boatX, width: 80, edge: 200 }];
+      game.update(1 / 120, true, true);
+      assert(game.failure && game.manualBoost === 0 && game.packBoost === 0 && game.superAmount === 0);
+      game.reset();
+      assert(game.manualBoost === 0 && game.packBoost === 0);
     }
   });
   test("Autopilot clears late hazards, warns before safe handoff and pauses with active time", () => {
@@ -357,13 +397,13 @@ export function runTests() {
     const values = new Map([[PROGRESS_KEY, JSON.stringify(legacy)]]);
     const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
     const store = new ProgressStore(storage);
-    assert(store.data.version === 5 && store.data.coins === 123 && store.data.selected === "mint");
+    assert(store.data.version === 6 && store.data.coins === 123 && store.data.selected === "mint");
     assert(store.data.owned.includes("mint") && store.data.completed.includes("passes5") && store.data.dailyBests["2026-10-27"] === undefined);
     assert(store.data.legacyDailyBests["2026-10-27"] === 45, "Old daily record was not archived");
     assert(Object.values(store.data.totals).every(total => total === 0));
     assert(values.get(PROGRESS_KEY) === JSON.stringify(legacy), "Read-only migration changed stored data");
     store.beginRun("2026-10-28", "v1-upgrade");
-    assert(JSON.parse(values.get(PROGRESS_KEY)).version === 5);
+    assert(JSON.parse(values.get(PROGRESS_KEY)).version === 6);
     assert(new ProgressStore(storage).data.coins === 123);
   });
   test("V2 saves keep prior-rule daily bests separate from new boosted rules", () => {
@@ -394,7 +434,7 @@ export function runTests() {
     data.legacyDailyBests["2026-10-31"] = 70;
     values.set(PROGRESS_KEY, JSON.stringify(data));
     const migrated = new ProgressStore(storage);
-    assert(migrated.data.version === 5 && migrated.data.coins === 25 && migrated.data.totals.collected === 17);
+    assert(migrated.data.version === 6 && migrated.data.coins === 25 && migrated.data.totals.collected === 17);
     assert(migrated.data.dailyBests["2026-10-31"] === undefined);
     assert(migrated.data.archivedBoostDailyBests["2026-10-31"] === 90 && migrated.data.legacyDailyBests["2026-10-31"] === 70);
     migrated.recordDaily("2026-10-31", 100);
@@ -416,6 +456,23 @@ export function runTests() {
     assert(migrated.data.dailyBests["2026-10-31"] === undefined);
     assert(migrated.data.archivedT10DailyBests["2026-10-31"] === 120);
     assert(migrated.data.archivedBoostDailyBests["2026-10-31"] === 90 && migrated.data.legacyDailyBests["2026-10-31"] === 70);
+  });
+  test("T11 migration archives scores without changing bank, inventory or reward receipts", () => {
+    const values = new Map();
+    const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+    const original = new ProgressStore(storage);
+    const id = original.beginRun("2026-10-31", "t11-gift");
+    original.recordRun({ collected: 0, passed: 0, perfects: 0, giftCoins: 10 }, id);
+    const data = structuredClone(original.data);
+    data.version = 5;
+    delete data.archivedT11DailyBests;
+    data.dailyBests["2026-10-31"] = 123;
+    values.set(PROGRESS_KEY, JSON.stringify(data));
+    const migrated = new ProgressStore(storage);
+    assert(migrated.data.version === 6 && migrated.data.dailyBests["2026-10-31"] === undefined);
+    assert(migrated.data.archivedT11DailyBests["2026-10-31"] === 123);
+    migrated.recordRun({ collected: 0, passed: 0, perfects: 0, giftCoins: 10 }, id);
+    assert(migrated.data.coins === 10 && migrated.data.selected === data.selected);
   });
   test("Rotating daily missions aggregate short runs and pay once even after reload/clock rollback", () => {
     const values = new Map();
@@ -556,10 +613,13 @@ export function runTests() {
           game.spawn(game.distance + 720);
         }
         for (let frame = 0; frame < 60 * 100; frame++) {
+          game.effect = { type: "booster", remaining: 6 };
           const coins = game.coins.slice();
+          const gifts = game.gifts.slice();
           game.update(1 / 60, game.next?.type === "rock", true);
           assert(game.failure === null, `${mode}, seed ${seed}, frame ${frame}`);
           assert(coins.every(coin => coin.collected || coin.x > game.distance - 50), `${mode}: missed a safe-path coin`);
+          assert(gifts.every(gift => gift.collected || gift.x > game.distance - 50), `${mode}: missed a safe-path pickup`);
         }
         assert(game.collected >= game.passed * 3, `${mode}: coin trail was unreachable`);
       }
@@ -570,7 +630,7 @@ export function runTests() {
     try { game.reset("unknown"); } catch (error) { rejected = error instanceof RangeError; }
     assert(rejected);
   });
-  test("200 seeded runs: 100 seconds of reachable obstacles, including max speed", () => {
+  test("200 seeded runs: 150 seconds of reachable obstacles, including max speed", () => {
     for (let seed = 1; seed <= 200; seed++) {
       const game = new TideGame(seeded(seed));
       if (seed % 2 === 0) {
@@ -580,7 +640,7 @@ export function runTests() {
         game.spawn(game.distance + 720);
       }
       let previous;
-      for (let frame = 0; frame < 60 * 100; frame++) {
+      for (let frame = 0; frame < 60 * 150; frame++) {
         const obstacle = game.next;
         if (obstacle && obstacle !== previous) {
           if (previous) {
@@ -644,6 +704,7 @@ export async function runBrowserTests() {
   const storageKeys = ["tiny-tide-best", "tiny-tide-best-easy", "tiny-tide-best-medium", "tiny-tide-best-fast",
     ...["easy", "medium", "fast"].map(mode => `tiny-tide-best-tide-boost-2-${mode}`),
     ...["easy", "medium", "fast"].map(mode => `tiny-tide-best-tide-boost-3-${mode}`),
+    ...["easy", "medium", "fast"].map(mode => `tiny-tide-best-tide-gifts-4-${mode}`),
     ...["easy", "medium", "fast"].map(scoreKey), "tiny-tide-coins", "tiny-tide-muted", PROGRESS_KEY];
   const originals = new Map(storageKeys.map(key => [key, localStorage.getItem(key)]));
   for (const key of storageKeys) localStorage.removeItem(key);
@@ -906,7 +967,7 @@ export async function runBrowserTests() {
       }
       const initialBank = Number(el("coin-bank").textContent);
       const dailyBefore = JSON.parse(localStorage.getItem(PROGRESS_KEY)).dailyGoals[utcDate()]?.claimed || [];
-      safeFrames(2100);
+      safeFrames(3600);
       const run = win.testGame;
       const completed = JSON.parse(localStorage.getItem(PROGRESS_KEY)).completed;
       assert(run.collected >= 10 && run.passed >= 5);
@@ -1181,7 +1242,7 @@ export async function runBrowserTests() {
       assert(win.audioStats.notes === 0, "Muted crash played audio");
       win.parent.testReducedMotion = false;
     });
-    await test("Gift UI reveals four effects, preserves pause timers and saves gift coins once", () => {
+    await test("Pickup UI identifies three effects, super boost and paused timers, and saves coins once", () => {
       for (const type of Object.keys(GIFTS)) {
         el("play").click(); frames(1);
         const game = win.testGame;
@@ -1190,6 +1251,7 @@ export async function runBrowserTests() {
         game.gifts = [{ x: game.distance + RULES.boatX, y: waterY(game.lift) - 18, effect: type }];
         frames(1);
         assert(!el("gift-status").hidden && el("gift-status").textContent.includes(type === "coins" ? "+10 coins" : GIFTS[type].label));
+        assert(el("gift-status").textContent.includes(GIFTS[type].icon));
         if (type === "coins") {
           assert(Number(el("coin-bank").textContent) === bank + 10);
           assert(JSON.parse(localStorage.getItem(PROGRESS_KEY)).totals.collected === totals);
@@ -1200,8 +1262,13 @@ export async function runBrowserTests() {
           key("keydown", "KeyP"); frames(100);
           assert(game.effect.remaining === timer);
           el("play").click(); frames(16);
-          if (type === "booster") assert(el("flow").textContent.includes("BOOST 1.60"));
-          if (type === "slow") assert(Math.abs(game.speed / game.baseSpeed - .6) < 1e-9);
+          if (type === "booster") {
+            assert(el("flow").textContent.includes("BOOST 1.60"));
+            key("keydown", "ArrowRight"); frames(18);
+            assert(el("flow").textContent.includes("SUPER BOOST 2.20"));
+            key("keyup", "ArrowRight"); frames(15);
+            assert(el("flow").textContent.includes("BOOST 1.60"));
+          }
           if (type === "autopilot") assert(game.lift > .34);
         }
         game.obstacles = [{ type: "rock", x: game.distance + RULES.boatX, width: 80, edge: 200, passed: false }];
@@ -1218,7 +1285,7 @@ export async function runBrowserTests() {
       key("keydown", "KeyP");
       win.navigator.serviceWorker.dispatchEvent(new win.Event("controllerchange"));
       assert(el("overlay-title").textContent === "A moment of calm." && win.testGame === run);
-      assert(el("build").textContent === "Build T11");
+      assert(el("build").textContent === "Build T12");
     });
   } finally {
     iframe.remove();

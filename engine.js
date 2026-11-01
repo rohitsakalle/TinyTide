@@ -1,6 +1,6 @@
 export const RULES = Object.freeze({
   height: 600, boatX: 122, boatHalfWidth: 26, boatHeight: 40, draft: 9,
-  lowWater: 465, travel: 220, tideRate: 0.68, boostFactor: 1.6,
+  lowWater: 465, travel: 220, tideRate: 0.68, boostFactor: 1.6, maxBoostFactor: 2.2,
   progressionSeconds: 90,
 });
 export const MODES = Object.freeze({
@@ -9,14 +9,13 @@ export const MODES = Object.freeze({
   fast: Object.freeze({ label: "Fast", startSpeed: 190, maxSpeed: 275 }),
 });
 export const GIFTS = Object.freeze({
-  booster: { label: "Booster pack", icon: ">>", color: "#e59335", duration: 6 },
-  slow: { label: "Slow-motion", icon: "~", color: "#67bad0", duration: 6 },
-  autopilot: { label: "Autopilot", icon: "A", color: "#b095dc", duration: 8 },
-  coins: { label: "+10 coins", icon: "+10", color: "#e1bb47", duration: 0 },
+  booster: { label: "Booster pack", icon: "🚀", color: "#e59335", duration: 6 },
+  autopilot: { label: "Autopilot", icon: "🧭", color: "#b095dc", duration: 8 },
+  coins: { label: "+10 coins", icon: "🪙", color: "#e1bb47", duration: 0 },
 });
 
 export function minimumViewWidth(mode) {
-  return Math.max(560, Math.ceil(MODES[mode].maxSpeed * RULES.boostFactor * (1 / RULES.tideRate + .5) + RULES.boatX + RULES.boatHalfWidth));
+  return Math.max(560, Math.ceil(MODES[mode].maxSpeed * RULES.maxBoostFactor * (1 / RULES.tideRate + .5) + RULES.boatX + RULES.boatHalfWidth));
 }
 
 export function waterY(lift) {
@@ -59,6 +58,9 @@ export class TideGame {
     this.spawnCount = 0;
     this.lastType = "bridge";
     this.boostAmount = 0;
+    this.manualBoost = 0;
+    this.packBoost = 0;
+    this.superAmount = 0;
     this.gifts = [];
     this.giftEvents = [];
     this.giftCoins = 0;
@@ -87,7 +89,7 @@ export class TideGame {
       this.coins.push({ x: x - offset, y: waterY(type === "rock" ? 1 : 0) - 18 });
     }
     if (this.spawnCount % 4 === 2) {
-      const effect = Object.keys(GIFTS)[Math.floor(this.random() * 4)];
+      const effect = ["booster", "booster", "autopilot", "coins"][Math.floor(this.random() * 4)];
       this.gifts.push({ x: x - 70, y: waterY(type === "rock" ? 1 : 0) - 18, effect });
     }
     return obstacle;
@@ -122,10 +124,12 @@ export class TideGame {
       const tideHolding = auto ? this.next?.type === "rock" : holding;
       this.lift = Math.max(0, Math.min(1, this.lift + (tideHolding ? 1 : -1) * RULES.tideRate * step));
       this.baseSpeed = this.difficulty.startSpeed + (this.difficulty.maxSpeed - this.difficulty.startSpeed) * this.progression;
-      this.boostAmount = Math.max(0, Math.min(1, this.boostAmount + (boosting || this.effect?.type === "booster" ? 4 : -6) * step));
+      this.manualBoost = Math.max(0, Math.min(1, this.manualBoost + (boosting ? 4 : -6) * step));
+      this.packBoost = Math.max(0, Math.min(1, this.packBoost + (this.effect?.type === "booster" ? 4 : -6) * step));
+      this.boostAmount = Math.max(this.manualBoost, this.packBoost);
+      this.superAmount = Math.min(this.manualBoost, this.packBoost);
       this.handoff = Math.max(0, this.handoff - step);
-      const slow = this.effect?.type === "slow" || this.handoff > 0;
-      this.speed = this.baseSpeed * (slow ? .6 : 1 + (RULES.boostFactor - 1) * this.boostAmount);
+      this.speed = this.baseSpeed * (this.handoff > 0 ? .6 : 1 + (RULES.boostFactor - 1) * (this.manualBoost + this.packBoost));
       this.distance += this.speed * step;
       const left = this.distance + RULES.boatX - RULES.boatHalfWidth;
       const right = this.distance + RULES.boatX + RULES.boatHalfWidth;
@@ -174,6 +178,9 @@ export class TideGame {
         this.effect = null;
         this.handoff = 0;
         this.boostAmount = 0;
+        this.manualBoost = 0;
+        this.packBoost = 0;
+        this.superAmount = 0;
         this.giftFeedback = null;
       }
       this.gifts = this.gifts.filter(gift => !gift.collected && gift.x > this.distance - 50);
@@ -199,7 +206,7 @@ export class TideGame {
     // Budget at the maximum boosted speed, including overlap, coin approach,
     // a full-height transition, and reaction time.
     return 2 * RULES.boatHalfWidth + 90
-      + this.difficulty.maxSpeed * RULES.boostFactor * (1 / RULES.tideRate + .25 + .7 * (1 - this.courseProgression));
+      + this.difficulty.maxSpeed * RULES.maxBoostFactor * (1 / RULES.tideRate + .25 + .7 * (1 - this.courseProgression));
   }
   get next() { return this.obstacles.find(o => !o.passed); }
 }

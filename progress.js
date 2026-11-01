@@ -28,13 +28,13 @@ const newRunId = () => Array.from(crypto.getRandomValues(new Uint32Array(4)), wo
 
 const isCount = value => Number.isSafeInteger(value) && value >= 0;
 const fresh = coins => ({
-  version: 5, coins, owned: ["paper"], selected: "paper", completed: [], dailyBests: {}, legacyDailyBests: {}, archivedBoostDailyBests: {}, archivedT10DailyBests: {},
+  version: 6, coins, owned: ["paper"], selected: "paper", completed: [], dailyBests: {}, legacyDailyBests: {}, archivedBoostDailyBests: {}, archivedT10DailyBests: {}, archivedT11DailyBests: {},
   totals: counts(), dailyGoals: {}, runs: {},
 });
 
 function decode(raw) {
   const data = JSON.parse(raw);
-  if (!data || ![1, 2, 3, 4, 5].includes(data.version) || !isCount(data.coins)
+  if (!data || ![1, 2, 3, 4, 5, 6].includes(data.version) || !isCount(data.coins)
     || !Array.isArray(data.owned) || !data.owned.includes("paper") || data.owned.some(id => !Object.hasOwn(SKINS, id))
     || !data.owned.includes(data.selected) || !Array.isArray(data.completed)
     || data.completed.some(id => !MISSIONS.some(mission => mission.id === id))
@@ -54,7 +54,7 @@ function decode(raw) {
     return {
       ...fresh(data.coins),
       ...data,
-      version: 5,
+      version: 6,
       dailyBests: {},
       legacyDailyBests,
       archivedBoostDailyBests: data.version === 3 ? data.dailyBests : {},
@@ -67,8 +67,10 @@ function decode(raw) {
   if (!validDailyScores(data.legacyDailyBests) || !validDailyScores(data.archivedBoostDailyBests)) {
     throw new Error("Saved prior-rule records are invalid. Existing data has not been overwritten.");
   }
-  if (data.version === 4) return { ...data, version: 5, dailyBests: {}, archivedT10DailyBests: data.dailyBests };
+  if (data.version === 4) return { ...data, version: 6, dailyBests: {}, archivedT10DailyBests: data.dailyBests, archivedT11DailyBests: {} };
   if (!validDailyScores(data.archivedT10DailyBests)) throw new Error("Saved T10 records are invalid. Existing data has not been overwritten.");
+  if (data.version === 5) return { ...data, version: 6, dailyBests: {}, archivedT11DailyBests: data.dailyBests };
+  if (!validDailyScores(data.archivedT11DailyBests)) throw new Error("Saved T11 records are invalid. Existing data has not been overwritten.");
   return data;
 }
 
